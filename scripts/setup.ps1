@@ -1,100 +1,100 @@
-ï»¿# =============================================================================
-# setup.ps1 â€” Local LLM Stack ì´ˆê¸° ì„¤ì¹˜ ìŠ¤í¬ë¦½íŠ¸
 # =============================================================================
-# ìƒˆ PCì—ì„œ ì´ ë ˆí¬ë¥¼ í´ë¡ í•œ í›„ ì‹¤í–‰í•©ë‹ˆë‹¤.
+# setup.ps1 ? Local LLM Stack ÃÊ±â ¼³Ä¡ ½ºÅ©¸³Æ®
+# =============================================================================
+# »õ PC¿¡¼­ ÀÌ ·¹Æ÷¸¦ Å¬·ĞÇÑ ÈÄ ½ÇÇàÇÕ´Ï´Ù.
 #
-# ì‚¬ì „ í•„ìˆ˜ ì„¤ì¹˜:
+# »çÀü ÇÊ¼ö ¼³Ä¡:
 #   - Ollama       : https://ollama.com/download
 #   - Docker Desktop : https://www.docker.com/products/docker-desktop
 #   - Git          : https://git-scm.com
 #
-# ì‹¤í–‰ ë°©ë²•:
-#   PowerShellì„ ê´€ë¦¬ì ê¶Œí•œìœ¼ë¡œ ì—´ê³  ì•„ë˜ ëª…ë ¹ ì‹¤í–‰
+# ½ÇÇà ¹æ¹ı:
+#   PowerShellÀ» °ü¸®ÀÚ ±ÇÇÑÀ¸·Î ¿­°í ¾Æ·¡ ¸í·É ½ÇÇà
 #   Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 #   .\scripts\setup.ps1
 # =============================================================================
 
 param(
-    # Open WebUI ë°ì´í„°, .env, docker-compose.yml ë“± ëŸ°íƒ€ì„ íŒŒì¼ì´ ì €ì¥ë  ê²½ë¡œ
-    [string]$ConfigDir = "C:\your\path\to\local-llm-config",   # â† ìˆ˜ì • í•„ìš”
+    # Open WebUI µ¥ÀÌÅÍ, .env, docker-compose.yml µî ·±Å¸ÀÓ ÆÄÀÏÀÌ ÀúÀåµÉ °æ·Î
+    [string]$ConfigDir = "$env:USERPROFILE\local-llm-config",  # ¡ç Æú´õ¸í ´Ù¸£¸é ¼öÁ¤
 
-    # ì´ ìŠ¤í¬ë¦½íŠ¸ íŒŒì¼ ê¸°ì¤€ ë ˆí¬ ë£¨íŠ¸ (ìˆ˜ì • ë¶ˆí•„ìš”)
+    # ÀÌ ½ºÅ©¸³Æ® ÆÄÀÏ ±âÁØ ·¹Æ÷ ·çÆ® (¼öÁ¤ ºÒÇÊ¿ä)
     [string]$RepoDir = (Split-Path $PSScriptRoot -Parent)
 )
 
 function Write-Step($msg) {
     Write-Host "`n[$([datetime]::Now.ToString('HH:mm:ss'))] $msg" -ForegroundColor Cyan
 }
-function Write-OK($msg)   { Write-Host "  âœ“ $msg" -ForegroundColor Green }
-function Write-Warn($msg) { Write-Host "  âš  $msg" -ForegroundColor Yellow }
-function Write-Fail($msg) { Write-Host "  âœ— $msg" -ForegroundColor Red }
+function Write-OK($msg)   { Write-Host "  ? $msg" -ForegroundColor Green }
+function Write-Warn($msg) { Write-Host "  ? $msg" -ForegroundColor Yellow }
+function Write-Fail($msg) { Write-Host "  ? $msg" -ForegroundColor Red }
 
 Write-Host @"
 
 =============================================
-  Local LLM Stack ì´ˆê¸° ì„¤ì¹˜ ìŠ¤í¬ë¦½íŠ¸
+  Local LLM Stack ÃÊ±â ¼³Ä¡ ½ºÅ©¸³Æ®
 =============================================
-  ì„¤ì • ë””ë ‰í† ë¦¬ : $ConfigDir
-  ë ˆí¬ ë””ë ‰í† ë¦¬ : $RepoDir
+  ¼³Á¤ µğ·ºÅä¸® : $ConfigDir
+  ·¹Æ÷ µğ·ºÅä¸® : $RepoDir
 =============================================
 "@ -ForegroundColor Cyan
 
 # -----------------------------------------------------------------------------
-# 0. ì‚¬ì „ ìš”êµ¬ì‚¬í•­ í™•ì¸
+# 0. »çÀü ¿ä±¸»çÇ× È®ÀÎ
 # -----------------------------------------------------------------------------
-Write-Step "ì‚¬ì „ ìš”êµ¬ì‚¬í•­ í™•ì¸ ì¤‘..."
+Write-Step "»çÀü ¿ä±¸»çÇ× È®ÀÎ Áß..."
 
 $allOk = $true
 foreach ($cmd in @("ollama --version", "docker --version", "git --version")) {
     $name = $cmd.Split(" ")[0]
     try {
         Invoke-Expression $cmd 2>&1 | Out-Null
-        Write-OK "$name ì„¤ì¹˜ í™•ì¸"
+        Write-OK "$name ¼³Ä¡ È®ÀÎ"
     } catch {
-        Write-Fail "$name ë¯¸ì„¤ì¹˜ â€” ì„¤ì¹˜ í›„ ë‹¤ì‹œ ì‹¤í–‰í•˜ì„¸ìš”"
+        Write-Fail "$name ¹Ì¼³Ä¡ ? ¼³Ä¡ ÈÄ ´Ù½Ã ½ÇÇàÇÏ¼¼¿ä"
         $allOk = $false
     }
 }
 
 if (-not $allOk) {
-    Write-Host "`ní•„ìˆ˜ í”„ë¡œê·¸ë¨ì„ ë¨¼ì € ì„¤ì¹˜í•˜ì„¸ìš”." -ForegroundColor Red
+    Write-Host "`nÇÊ¼ö ÇÁ·Î±×·¥À» ¸ÕÀú ¼³Ä¡ÇÏ¼¼¿ä." -ForegroundColor Red
     exit 1
 }
 
 # -----------------------------------------------------------------------------
-# 1. ì„¤ì • ë””ë ‰í† ë¦¬ ìƒì„±
+# 1. ¼³Á¤ µğ·ºÅä¸® »ı¼º
 # -----------------------------------------------------------------------------
-Write-Step "ì„¤ì • ë””ë ‰í† ë¦¬ ìƒì„± ì¤‘..."
+Write-Step "¼³Á¤ µğ·ºÅä¸® »ı¼º Áß..."
 
 foreach ($dir in @("$ConfigDir\docker", "$ConfigDir\ollama")) {
     if (-not (Test-Path $dir)) {
         New-Item -ItemType Directory -Force -Path $dir | Out-Null
-        Write-OK "ìƒì„±: $dir"
+        Write-OK "»ı¼º: $dir"
     } else {
-        Write-OK "ì´ë¯¸ ì¡´ì¬: $dir"
+        Write-OK "ÀÌ¹Ì Á¸Àç: $dir"
     }
 }
 
 # -----------------------------------------------------------------------------
-# 2. Modelfile ë³µì‚¬
+# 2. Modelfile º¹»ç
 # -----------------------------------------------------------------------------
-Write-Step "Modelfile ë³µì‚¬ ì¤‘..."
+Write-Step "Modelfile º¹»ç Áß..."
 
 foreach ($mf in @("Modelfile.coder", "Modelfile.exaone", "Modelfile.qwen3", "Modelfile.r1")) {
     $src = "$RepoDir\modelfiles\$mf"
     $dst = "$ConfigDir\ollama\$mf"
     if (Test-Path $src) {
         Copy-Item $src $dst -Force
-        Write-OK "ë³µì‚¬: $mf"
+        Write-OK "º¹»ç: $mf"
     } else {
-        Write-Warn "íŒŒì¼ ì—†ìŒ: $src"
+        Write-Warn "ÆÄÀÏ ¾øÀ½: $src"
     }
 }
 
 # -----------------------------------------------------------------------------
-# 3. Ollama í™˜ê²½ë³€ìˆ˜ ì„¤ì •
+# 3. Ollama È¯°æº¯¼ö ¼³Á¤
 # -----------------------------------------------------------------------------
-Write-Step "Ollama í™˜ê²½ë³€ìˆ˜ ì„¤ì • ì¤‘..."
+Write-Step "Ollama È¯°æº¯¼ö ¼³Á¤ Áß..."
 
 $envVars = @{
     "OLLAMA_HOST"              = "0.0.0.0"
@@ -102,7 +102,7 @@ $envVars = @{
     "OLLAMA_MAX_LOADED_MODELS" = "1"
     "OLLAMA_KEEP_ALIVE"        = "30m"
     "OLLAMA_KV_CACHE_TYPE"     = "q8_0"
-    "OLLAMA_VULKAN"            = "1"     # AMD GPU ì‚¬ìš© ì‹œ. NVIDIAëŠ” ì œê±° ê°€ëŠ¥
+    "OLLAMA_VULKAN"            = "1"     # AMD GPU »ç¿ë ½Ã. NVIDIA´Â Á¦°Å °¡´É
 }
 
 foreach ($key in $envVars.Keys) {
@@ -111,9 +111,9 @@ foreach ($key in $envVars.Keys) {
 }
 
 # -----------------------------------------------------------------------------
-# 4. Ollama ëª¨ë¸ ë‹¤ìš´ë¡œë“œ + ì»¤ìŠ¤í…€ ëª¨ë¸ ë“±ë¡
+# 4. Ollama ¸ğµ¨ ´Ù¿î·Îµå + Ä¿½ºÅÒ ¸ğµ¨ µî·Ï
 # -----------------------------------------------------------------------------
-Write-Step "Ollama ê¸°ë°˜ ëª¨ë¸ ë‹¤ìš´ë¡œë“œ ì¤‘... (ìˆ˜ GB, ì‹œê°„ì´ ì˜¤ë˜ ê±¸ë¦´ ìˆ˜ ìˆìŠµë‹ˆë‹¤)"
+Write-Step "Ollama ±â¹İ ¸ğµ¨ ´Ù¿î·Îµå Áß... (¼ö GB, ½Ã°£ÀÌ ¿À·¡ °É¸± ¼ö ÀÖ½À´Ï´Ù)"
 
 $baseModels = @(
     "qwen2.5-coder:7b-instruct-q4_K_M",
@@ -124,16 +124,16 @@ $baseModels = @(
 )
 
 foreach ($model in $baseModels) {
-    Write-Host "  ë‹¤ìš´ë¡œë“œ ì¤‘: $model" -ForegroundColor Gray
+    Write-Host "  ´Ù¿î·Îµå Áß: $model" -ForegroundColor Gray
     ollama pull $model
     if ($LASTEXITCODE -eq 0) {
-        Write-OK "$model ì™„ë£Œ"
+        Write-OK "$model ¿Ï·á"
     } else {
-        Write-Warn "$model ì‹¤íŒ¨ â€” ìˆ˜ë™ ì‹¤í–‰: ollama pull $model"
+        Write-Warn "$model ½ÇÆĞ ? ¼öµ¿ ½ÇÇà: ollama pull $model"
     }
 }
 
-Write-Step "ì»¤ìŠ¤í…€ ëª¨ë¸ ë“±ë¡ ì¤‘..."
+Write-Step "Ä¿½ºÅÒ ¸ğµ¨ µî·Ï Áß..."
 
 $customModels = @(
     @{ Name = "llm-coder";  File = "$ConfigDir\ollama\Modelfile.coder" },
@@ -145,78 +145,78 @@ $customModels = @(
 foreach ($cm in $customModels) {
     if (Test-Path $cm.File) {
         ollama create $cm.Name -f $cm.File
-        if ($LASTEXITCODE -eq 0) { Write-OK "$($cm.Name) ë“±ë¡ ì™„ë£Œ" }
-        else                     { Write-Warn "$($cm.Name) ë“±ë¡ ì‹¤íŒ¨" }
+        if ($LASTEXITCODE -eq 0) { Write-OK "$($cm.Name) µî·Ï ¿Ï·á" }
+        else                     { Write-Warn "$($cm.Name) µî·Ï ½ÇÆĞ" }
     } else {
-        Write-Warn "Modelfile ì—†ìŒ: $($cm.File)"
+        Write-Warn "Modelfile ¾øÀ½: $($cm.File)"
     }
 }
 
 # -----------------------------------------------------------------------------
-# 5. .env íŒŒì¼ ìƒì„±
+# 5. .env ÆÄÀÏ »ı¼º
 # -----------------------------------------------------------------------------
-Write-Step ".env íŒŒì¼ ìƒì„± ì¤‘..."
+Write-Step ".env ÆÄÀÏ »ı¼º Áß..."
 
 $envFile = "$ConfigDir\docker\.env"
 if (Test-Path $envFile) {
-    Write-Warn ".env íŒŒì¼ì´ ì´ë¯¸ ì¡´ì¬í•©ë‹ˆë‹¤ â€” ë®ì–´ì“°ì§€ ì•ŠìŠµë‹ˆë‹¤"
+    Write-Warn ".env ÆÄÀÏÀÌ ÀÌ¹Ì Á¸ÀçÇÕ´Ï´Ù ? µ¤¾î¾²Áö ¾Ê½À´Ï´Ù"
 } else {
     $secretKey = -join ((65..90) + (97..122) + (48..57) | Get-Random -Count 32 | ForEach-Object {[char]$_})
-    $googleKey = Read-Host "Google Gemini API í‚¤ë¥¼ ì…ë ¥í•˜ì„¸ìš” (ì—†ìœ¼ë©´ Enter ìŠ¤í‚µ)"
+    $googleKey = Read-Host "Google Gemini API Å°¸¦ ÀÔ·ÂÇÏ¼¼¿ä (¾øÀ¸¸é Enter ½ºÅµ)"
 
     $envContent = "WEBUI_SECRET_KEY=$secretKey`n"
     if ($googleKey) { $envContent += "GOOGLE_API_KEY=$googleKey`n" }
 
     [System.IO.File]::WriteAllText($envFile, $envContent, [System.Text.Encoding]::UTF8)
-    Write-OK ".env ìƒì„± ì™„ë£Œ (SECRET_KEY ìë™ ìƒì„±ë¨)"
+    Write-OK ".env »ı¼º ¿Ï·á (SECRET_KEY ÀÚµ¿ »ı¼ºµÊ)"
 }
 
 # -----------------------------------------------------------------------------
-# 6. docker-compose.yml í™•ì¸
+# 6. docker-compose.yml È®ÀÎ
 # -----------------------------------------------------------------------------
-Write-Step "docker-compose.yml í™•ì¸ ì¤‘..."
+Write-Step "docker-compose.yml È®ÀÎ Áß..."
 
 if (-not (Test-Path "$ConfigDir\docker\docker-compose.yml")) {
-    Write-Warn "docker-compose.yml ì—†ìŒ â€” README.mdë¥¼ ì°¸ê³ í•´ ìˆ˜ë™ìœ¼ë¡œ ìƒì„±í•˜ì„¸ìš”"
+    Write-Warn "docker-compose.yml ¾øÀ½ ? README.md¸¦ Âü°íÇØ ¼öµ¿À¸·Î »ı¼ºÇÏ¼¼¿ä"
 } else {
-    Write-OK "docker-compose.yml ì¡´ì¬ í™•ì¸"
+    Write-OK "docker-compose.yml Á¸Àç È®ÀÎ"
 }
 
 # -----------------------------------------------------------------------------
-# 7. Open WebUI ì‹¤í–‰
+# 7. Open WebUI ½ÇÇà
 # -----------------------------------------------------------------------------
-Write-Step "Open WebUI ì‹œì‘"
+Write-Step "Open WebUI ½ÃÀÛ"
 
-$answer = Read-Host "Open WebUIë¥¼ ì§€ê¸ˆ ì‹œì‘í• ê¹Œìš”? (y/n)"
+$answer = Read-Host "Open WebUI¸¦ Áö±İ ½ÃÀÛÇÒ±î¿ä? (y/n)"
 if ($answer -eq "y") {
     Set-Location "$ConfigDir\docker"
     docker compose up -d
     if ($LASTEXITCODE -eq 0) {
-        Write-OK "Open WebUI ì‹œì‘ë¨"
+        Write-OK "Open WebUI ½ÃÀÛµÊ"
         Start-Sleep -Seconds 5
         Start-Process "http://localhost:3000"
     } else {
-        Write-Warn "ì‹œì‘ ì‹¤íŒ¨ â€” ìˆ˜ë™ ì‹¤í–‰: cd $ConfigDir\docker && docker compose up -d"
+        Write-Warn "½ÃÀÛ ½ÇÆĞ ? ¼öµ¿ ½ÇÇà: cd $ConfigDir\docker && docker compose up -d"
     }
 }
 
 # -----------------------------------------------------------------------------
-# ì™„ë£Œ
+# ¿Ï·á
 # -----------------------------------------------------------------------------
 Write-Host @"
 
 =============================================
-  ì„¤ì¹˜ ì™„ë£Œ
+  ¼³Ä¡ ¿Ï·á
 =============================================
-  ë‹¤ìŒ ë‹¨ê³„:
-  1. http://localhost:3000 ì ‘ì† í›„ ê´€ë¦¬ì ê³„ì • ìƒì„±
-  2. Admin Panel > Functions ì—ì„œ ì•„ë˜ íŒŒì¼ ì½”ë“œ ë¶™ì—¬ë„£ê¸°:
+  ´ÙÀ½ ´Ü°è:
+  1. http://localhost:3000 Á¢¼Ó ÈÄ °ü¸®ÀÚ °èÁ¤ »ı¼º
+  2. Admin Panel > Functions ¿¡¼­ ¾Æ·¡ ÆÄÀÏ ÄÚµå ºÙ¿©³Ö±â:
      - functions/llm_router.py
      - functions/google_genai_manifold.py
-  3. Admin Panel > Settings > Documents ì„¤ì •:
+  3. Admin Panel > Settings > Documents ¼³Á¤:
      - Embedding Engine : Ollama
      - Embedding Model  : nomic-embed-text:latest
-  4. scripts/start.ps1 ì˜ WEBUI_DIR ê²½ë¡œë¥¼ ìˆ˜ì • í›„
-     ë¶€íŒ… ì‹œ ìë™ ì‹¤í–‰ìœ¼ë¡œ ë“±ë¡í•˜ì„¸ìš”.
+  4. scripts/start.ps1 ÀÇ WEBUI_DIR °æ·Î¸¦ ¼öÁ¤ ÈÄ
+     ºÎÆÃ ½Ã ÀÚµ¿ ½ÇÇàÀ¸·Î µî·ÏÇÏ¼¼¿ä.
 =============================================
 "@ -ForegroundColor Cyan

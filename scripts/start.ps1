@@ -8,7 +8,7 @@
 $OLLAMA_PATH    = "$env:LOCALAPPDATA\Programs\Ollama\ollama.exe"
 $DOCKER_PATH    = "C:\Program Files\Docker\Docker\Docker Desktop.exe"
 $TAILSCALE_PATH = "C:\Program Files\Tailscale\tailscale.exe"
-$WEBUI_DIR      = "C:\your\path\to\local-llm-config\docker"   # ← 수정 필요
+$WEBUI_DIR    = "$env:USERPROFILE\local-llm-config\docker"  # ← 폴더명이 다르면 수정
 $WEBUI_URL      = "http://localhost:3000"
 $PRELOAD_MODEL  = "llm-coder:latest"
 # =============================================================================
