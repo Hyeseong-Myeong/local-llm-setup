@@ -1,0 +1,11 @@
+﻿# 민감 정보
+.env
+*.secret
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# 임시 파일
+*.log
