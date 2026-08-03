@@ -1,0 +1,10 @@
+# Normalize line endings: LF by default, CRLF for Windows-only scripts
+* text=auto eol=lf
+
+*.bat text eol=crlf
+*.ps1 text eol=crlf
+
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.db binary
