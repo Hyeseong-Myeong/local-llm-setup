@@ -1,5 +1,7 @@
 import os
+
 from pydantic_settings import BaseSettings
+
 
 class Settings(BaseSettings):
     # 주요 환경 변수 설정 (.env 파일에서 주입받음)

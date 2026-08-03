@@ -4,34 +4,38 @@ import sys
 # 상위 디렉토리(src)를 모듈 검색 경로에 추가
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-import re
-import time
-import subprocess
 import argparse
+import re
+import subprocess
+import time
+
 import logger_setup
+
 logger_setup.setup_logger('wiki_agent.log')
-import shutil
-import requests
-import traceback
-import queue
-import threading
 import datetime
+import queue
+import shutil
+import threading
+import traceback
 from typing import TypedDict
-from dotenv import load_dotenv
+
 import chromadb
+import requests
 from chromadb.utils.embedding_functions import OllamaEmbeddingFunction
-from watchdog.observers import Observer
-from watchdog.events import FileSystemEventHandler
+from dotenv import load_dotenv
+from langchain_core.messages import HumanMessage, SystemMessage
+
 # pyrefly: ignore [missing-import]
 from langchain_openai import ChatOpenAI
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langgraph.graph import StateGraph, END
-from langchain_core.messages import SystemMessage, HumanMessage
-
-from config import settings
-from langfuse.langchain import CallbackHandler
 from langfuse import get_client
+from langfuse.langchain import CallbackHandler
+from langgraph.graph import END, StateGraph
+from watchdog.events import FileSystemEventHandler
+from watchdog.observers import Observer
+
 import prompts  # 새로 생성한 프롬프트 파일을 가져옵니다.
+from config import settings
 
 load_dotenv()
 
@@ -133,7 +137,7 @@ def unload_ollama_model(model_name: str):
     except Exception as e:
         print(f"   -> 퇴거 요청 에러: {e}. 좀비 사냥으로 전환.")
         kill_zombie_llama_servers()
-    
+
     # VRAM이 실제로 비워졌는지 확인 (GPU 드라이버 해제 지연 대응)
     wait_for_vram_clear()
 
@@ -154,12 +158,12 @@ def safe_move(src: str, dst_dir: str, file_name: str):
 try:
     chroma_client = chromadb.HttpClient(host=settings.CHROMA_HOST, port=settings.CHROMA_PORT)
     print("⏳ Ollama (bge-m3) 임베딩 모델 연결 중...")
-    
+
     ollama_ef = OllamaEmbeddingFunction(
         url=f"{settings.OLLAMA_BASE_URL}/api/embeddings",
         model_name="bge-m3:latest"
     )
-            
+
     collection = chroma_client.get_or_create_collection(name="my_wiki_db", embedding_function=ollama_ef)
     print(f"✅ ChromaDB 연결 및 Ollama 임베딩 설정 완료: {settings.CHROMA_HOST}:{settings.CHROMA_PORT}")
 except Exception as e:
@@ -174,8 +178,8 @@ llm = ChatOpenAI(model=settings.MODEL_NAME, base_url=settings.BIFROST_BASE_URL, 
 class AgentState(TypedDict):
     file_name: str
     raw_content: str
-    category: str        
-    context: str         
+    category: str
+    context: str
     cleaned_content: str
     compiled_content: str
     discord_msg_id: str
@@ -229,15 +233,15 @@ def classify_document(state: AgentState) -> AgentState:
 #  노드 2: 과거 지식 검색 (RAG)
 # ==========================================
 def retrieve_memory(state: AgentState) -> AgentState:
-    print(f"🧠 [2/4] NAS ChromaDB에서 연관 지식 검색 중...")
+    print("🧠 [2/4] NAS ChromaDB에서 연관 지식 검색 중...")
     if state.get('discord_msg_id'):
         send_discord_progress(f"🔄 **[분석 진행 중]** `{state['file_name']}`\n\n✅ 1. 대기열 진입 및 파일 읽기\n✅ 2. 카테고리 분석 완료 (결과: `{state['category']}`)\n⏳ 3. 연관 지식 검색 중...", state['discord_msg_id'])
     results = collection.query(
-        query_texts=[state['raw_content'][:500]], 
+        query_texts=[state['raw_content'][:500]],
         n_results=2,
         where={"category": state['category']}
     )
-    
+
     if results['documents'] and results['documents'][0]:
         # 과거 문서의 실제 내용은 넘기지 않고 링크 후보(제목)만 전달한다.
         # 내용을 함께 주면 모델이 본문 주제를 과거 문서 내용으로 대체해버리는 문제가 있어,
@@ -256,10 +260,10 @@ def retrieve_memory(state: AgentState) -> AgentState:
         state['context'] = "\n".join(f"[[{name}]]" for name in link_names)
     else:
         state['context'] = "검색된 과거 지식 없음."
-        
+
     # [NEW] 검색 끝났으므로 임베딩 모델 VRAM 강제 퇴거
     unload_ollama_model("bge-m3:latest")
-        
+
     return state
 
 # ==========================================
@@ -268,15 +272,15 @@ def retrieve_memory(state: AgentState) -> AgentState:
 def clean_data(state: AgentState) -> AgentState:
     if state.get('cleaned_content'):
         # 짧은 문서는 classify_document 단계에서 분류와 함께 이미 정제까지 완료됨 (중복 LLM 호출 방지)
-        print(f"🧹 [2.5/4] 원문 정제: 분류 단계에서 이미 완료됨 (중복 호출 생략)")
+        print("🧹 [2.5/4] 원문 정제: 분류 단계에서 이미 완료됨 (중복 호출 생략)")
         return state
 
     print(f"🧹 [2.5/4] 원문 정제 및 압축 중 (길이: {len(state['raw_content'])}자)...")
     if state.get('discord_msg_id'):
         send_discord_progress(f"🔄 **[분석 진행 중]** `{state['file_name']}`\n\n✅ 1. 대기열 진입 및 파일 읽기\n✅ 2. 카테고리 분석 완료 (결과: `{state['category']}`)\n✅ 3. 연관 지식 검색 완료\n⏳ 4. 원문 정제 및 요약 중 (길이: {len(state['raw_content'])}자)...", state['discord_msg_id'])
-    
+
     raw_text = state['raw_content']
-    
+
     # config의 SPLIT_THRESHOLD 이하면 단일 통과 압축 (코드 밀도 높은 문서나 추론형 모델 고려)
     if len(raw_text) <= settings.SPLIT_THRESHOLD:
         prompt_text = prompts.CLEAN_PROMPT.format(text=raw_text)
@@ -292,12 +296,12 @@ def clean_data(state: AgentState) -> AgentState:
         # 긴 원문: 문단 단위 분할 후 병합 (Map-Reduce)
         print("   [!] 텍스트가 매우 깁니다. 메모리 안정성을 위해 세밀하게 분할합니다.")
         text_splitter = RecursiveCharacterTextSplitter(
-            chunk_size=1800, 
+            chunk_size=1800,
             chunk_overlap=150,
             separators=["\n\n", "\n", " ", ""]
         )
         chunks = text_splitter.split_text(raw_text)
-        
+
         cleaned_chunks = []
         bound_llm = llm.bind(max_tokens=1024)
         for i, chunk in enumerate(chunks):
@@ -309,9 +313,9 @@ def clean_data(state: AgentState) -> AgentState:
             ]
             response = bound_llm.invoke(messages)
             cleaned_chunks.append(response.content)
-            
+
         state['cleaned_content'] = "\n\n".join(cleaned_chunks)
-        
+
     return state
 
 # ==========================================
@@ -381,69 +385,69 @@ def _invoke_compile_part(messages: list, part_name: str, base_max_tokens: int, f
 
 def compile_wiki(state: AgentState) -> AgentState:
     print(f"✍️  [3/4] {state['category'].upper()} 형식에 맞춰 위키 작성 중 (순차 생성)...")
-    
+
     with open(settings.SCHEMA_PATH, "r", encoding="utf-8") as f:
         schema_rules = f.read()
-        
+
     compiled_parts = []
-    
+
     # ---------------------------
     # Part 1: 개요 및 배경
     # ---------------------------
     print("   -> [Part 1] 개요 및 배경 작성 중...")
     if state.get('discord_msg_id'):
         send_discord_progress(f"🔄 **[분석 진행 중]** `{state['file_name']}`\n\n✅ 1~4. 대기열 진입부터 원문 정제 완료\n⏳ 5-1. 개요 및 배경 작성 중...", state['discord_msg_id'])
-    
+
     prompt_part1 = prompts.WIKI_COMPILE_PART1_PROMPT.format(
         schema_rules=schema_rules,
         cleaned_content=state['cleaned_content'],
         original_file_name=state['file_name']
     )
-    
+
     messages1 = [
         SystemMessage(content="You are an expert Obsidian knowledge manager. Output ONLY the requested markdown template. NO conversational filler. Start exactly with '---'."),
         HumanMessage(content=prompt_part1)
     ]
-    
+
     compiled_parts.append(_invoke_compile_part(messages1, "[Part 1] 개요 및 배경", 2048, 4096))
-    
+
     # ---------------------------
     # Part 2: 주요 핵심 내용
     # ---------------------------
     print("   -> [Part 2] 주요 핵심 내용 작성 중...")
     if state.get('discord_msg_id'):
         send_discord_progress(f"🔄 **[분석 진행 중]** `{state['file_name']}`\n\n✅ 1~4. 대기열 진입부터 원문 정제 완료\n✅ 5-1. 개요 및 배경 작성 완료\n⏳ 5-2. 본문(주요 핵심 내용) 작성 중...", state['discord_msg_id'])
-        
+
     prompt_part2 = prompts.WIKI_COMPILE_PART2_PROMPT.format(
         context=state['context'],
         cleaned_content=state['cleaned_content']
     )
-    
+
     messages2 = [
         SystemMessage(content="You are an expert Obsidian knowledge manager. Output ONLY the requested markdown template. NO conversational filler."),
         HumanMessage(content=prompt_part2)
     ]
-    
+
     compiled_parts.append(_invoke_compile_part(messages2, "[Part 2] 주요 핵심 내용", 3500, 5120))
-    
+
     # ---------------------------
     # Part 3: 인사이트 및 결론
     # ---------------------------
     print("   -> [Part 3] 인사이트 및 결론 작성 중...")
     if state.get('discord_msg_id'):
         send_discord_progress(f"🔄 **[분석 진행 중]** `{state['file_name']}`\n\n✅ 1~4. 대기열 진입부터 원문 정제 완료\n✅ 5-1. 개요 및 배경 작성 완료\n✅ 5-2. 본문 작성 완료\n⏳ 5-3. 결론 및 인사이트 작성 중...", state['discord_msg_id'])
-        
+
     prompt_part3 = prompts.WIKI_COMPILE_PART3_PROMPT.format(
         cleaned_content=state['cleaned_content']
     )
-    
+
     messages3 = [
         SystemMessage(content="You are an expert Obsidian knowledge manager. Output ONLY the requested markdown template. NO conversational filler."),
         HumanMessage(content=prompt_part3)
     ]
-    
+
     compiled_parts.append(_invoke_compile_part(messages3, "[Part 3] 인사이트 및 결론", 1536, 3072))
-    
+
     # 최종 마크다운 조립: 인사이트 및 결론을 최상단(헤더 바로 다음)에 노출시키기 위해
     # Part1 출력을 [헤더(프론트매터+제목+링크)]와 [개요 섹션]으로 분리한 뒤,
     # 헤더 -> 결론(1) -> 개요(2) -> 본문(3) 순서로 재배열한다.
@@ -459,10 +463,10 @@ def compile_wiki(state: AgentState) -> AgentState:
     state['compiled_content'] = "\n\n".join(
         part for part in [header, part3_content, overview_section, part2_content] if part
     )
-    
+
     # [NEW] 텍스트 생성 완료했으므로 LLM 강제 퇴거
     unload_ollama_model(settings.MODEL_NAME)
-    
+
     return state
 
 # ==========================================
@@ -477,11 +481,11 @@ def save_wiki(state: AgentState) -> AgentState:
         target_dir = settings.CAREER_DIR
     else:
         target_dir = settings.PERSONAL_DIR
-        
+
     os.makedirs(target_dir, exist_ok=True)
-    
+
     compiled_content = state['compiled_content']
-    
+
     # 제목 추출: "# [키워드] 제목" 형식의 첫 번째 줄 찾기
     title_match = re.search(r'^#\s+(.+)$', compiled_content, re.MULTILINE)
     if title_match:
@@ -493,26 +497,26 @@ def save_wiki(state: AgentState) -> AgentState:
         new_file_name = f"{safe_title}.md" if safe_title else f"AI_{state['file_name']}"
     else:
         new_file_name = f"AI_{state['file_name']}"
-        
+
     save_path = os.path.join(target_dir, new_file_name)
-    
+
     # 파일명 충돌 방지: 동일 파일이 존재하면 타임스탬프 접미사 추가
     if os.path.exists(save_path):
         base, ext = os.path.splitext(save_path)
         timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
         save_path = f"{base}_{timestamp}{ext}"
         print(f"   [!] 파일명 충돌 감지. 변경된 경로로 저장: {os.path.basename(save_path)}")
-    
+
     with open(save_path, "w", encoding="utf-8") as f:
         f.write(compiled_content)
-    
+
     text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
     chunks = text_splitter.split_text(compiled_content)
-    
+
     # 파일명 확정 후 base_name 계산 (충돌 시 접미사 반영)
     final_file_name = os.path.basename(save_path)
     base_name = final_file_name.replace(".md", "")
-    
+
     docs = []
     ids = []
     metadatas = []
@@ -520,7 +524,7 @@ def save_wiki(state: AgentState) -> AgentState:
         docs.append(chunk)
         ids.append(f"{base_name}_chunk_{i}")
         metadatas.append({"category": state['category'], "source": base_name})
-        
+
     if docs:
         # 구버전 청크 삭제: 동일 source의 이전 데이터가 남지 않도록 정리
         try:
@@ -529,7 +533,7 @@ def save_wiki(state: AgentState) -> AgentState:
                 collection.delete(ids=existing['ids'])
         except Exception:
             pass  # 기존 데이터 없으면 무시
-        
+
         collection.upsert(
             documents=docs,
             ids=ids,
@@ -581,15 +585,15 @@ def _is_failed_scrape_only(content: str) -> bool:
 
 def _invoke_agent(file_path: str, file_name: str):
     """에이전트 파이프라인 실행. 성공 시 True, 실패 시 예외 발생."""
-    
+
     # [선제적 VRAM 정리] 파이프라인 시작 전 좀비 프로세스를 사전 제거하여 OOM 방지
     print("🔍 [선제 점검] 파이프라인 시작 전 좀비 llama-server 점검 중...")
     kill_zombie_llama_servers()
     wait_for_vram_clear(max_wait=15)
-    
+
     with open(file_path, "r", encoding="utf-8") as f:
         content = f.read()
-        
+
     if not content.strip():
         print(f"⚠️ [경고] '{file_name}' 파일이 비어 있습니다. Error 폴더로 이동합니다.")
         safe_move(file_path, settings.ERROR_DIR, file_name)
@@ -603,24 +607,24 @@ def _invoke_agent(file_path: str, file_name: str):
 
 
     initial_state = {
-        "file_name": file_name, 
-        "raw_content": content, 
-        "category": "", 
-        "context": "", 
+        "file_name": file_name,
+        "raw_content": content,
+        "category": "",
+        "context": "",
         "cleaned_content": "",
         "compiled_content": "",
         "discord_msg_id": ""
     }
-    
+
     msg_id = send_discord_progress(f"🔄 **[분석 대기 중]** `{file_name}`\n\n⏳ 대기열 진입 및 파일 읽기 준비 중...")
     if msg_id:
         initial_state["discord_msg_id"] = msg_id
 
     lf_handler = CallbackHandler()
     final_state = app.invoke(initial_state, config={"callbacks": [lf_handler], "run_name": file_name})
-    
+
     safe_move(file_path, settings.ARCHIVE_DIR, file_name)
-    
+
     # 완료 알림은 진행 메시지를 수정(PATCH)하지 않고 항상 새 메시지로 보냄 (수정 시 디스코드 알림이 오지 않는 문제 방지)
     send_discord_notification(f"✅ **Wiki Agent 작성 완료!**\n- 문서: `{file_name}`\n- 카테고리: `{final_state.get('category', 'unknown')}`\n지식 DB에 성공적으로 저장되었습니다.")
     return True
@@ -632,26 +636,26 @@ def _is_ollama_server_error(error_msg: str) -> bool:
 
 def process_file(file_path: str):
     file_name = os.path.basename(file_path)
-    
+
     try:
         _invoke_agent(file_path, file_name)
-        
+
     except Exception as e:
         error_msg = str(e)
         print(f"❌ [에러] '{file_name}' 처리 중 오류 발생: {error_msg}")
         traceback.print_exc()
-        
+
         # [자가 치유] Ollama 서버 에러(OOM/좀비)일 경우 1회 재시도
         if _is_ollama_server_error(error_msg) and os.path.exists(file_path):
             print("🔧 [자가 치유] Ollama 서버 에러 감지! 좀비 프로세스 정리 후 재시도합니다...")
             send_discord_notification(f"🔧 **[자가 치유 가동]** `{file_name}`\nOllama 서버 에러 감지. 좀비 프로세스 정리 후 재시도합니다...")
-            
+
             # 1. 좀비 사살
             kill_zombie_llama_servers()
             # 2. VRAM 완전 해제 대기
             time.sleep(5)
             wait_for_vram_clear(max_wait=15)
-            
+
             # 3. 재시도 (1회만)
             try:
                 print(f"🔄 [재시도] '{file_name}' 다시 처리합니다...")
@@ -661,7 +665,7 @@ def process_file(file_path: str):
             except Exception as retry_e:
                 print(f"❌ [자가 치유 실패] 재시도도 실패: {retry_e}")
                 error_msg = str(retry_e)  # 최종 에러 메시지 갱신
-        
+
         # 최종 실패: 디스코드 알림 + Error 폴더 이동
         send_discord_notification(f"🚨 **Wiki Agent 에러 발생**\n- 파일명: `{file_name}`\n- 원인: {error_msg}")
         try:
@@ -680,9 +684,9 @@ def worker():
         file_path = file_queue.get()
         if file_path is None:
             break
-            
+
         file_basename = os.path.basename(file_path)
-        
+
         while True:
             # 1. 업무 시간 체크 (08:00~12:00 및 13:00~22:00)
             # 사용자의 업무 미진행 시간(점심 12:00~13:00)은 허용하여 AI가 작업할 수 있도록 함
@@ -691,40 +695,40 @@ def worker():
             morning_end = datetime.time(12, 0)
             afternoon_start = datetime.time(13, 0)
             afternoon_end = datetime.time(22, 0)
-            
+
             is_working_time = (morning_start <= now < morning_end) or (afternoon_start <= now < afternoon_end)
-            
+
             if is_working_time:
                 print(f"⏳ [워커 대기] 업무 시간 중입니다. 대기 중: {file_basename}")
                 time.sleep(10 * 60)  # 10분 단위로 체크
                 continue
-                
+
             # 2. Ollama 상태 체크 (타 모델 실행 여부)
             try:
                 resp = requests.get(f"{settings.OLLAMA_BASE_URL}/api/ps", timeout=5)
                 if resp.status_code == 200:
                     data = resp.json()
                     loaded_models = [m['name'] for m in data.get('models', [])]
-                    
+
                     my_model = settings.MODEL_NAME
                     # 현재 지정된 Wiki 모델이 아닌 다른 모델이 로드되어 있는지 확인
                     other_models = [m for m in loaded_models if my_model not in m]
-                    
+
                     if other_models:
                         print(f"⏸️ [모델 충돌 방지] 타 모델({', '.join(other_models)}) 사용 감지! 30분 대기합니다...")
                         time.sleep(30 * 60)  # 30분 대기 후 다시 시간/모델 체크로 돌아감
                         continue
             except Exception as e:
                 print(f"⚠️ Ollama 상태 확인 실패 (무시하고 진행): {e}")
-                
+
             # 업무 시간도 아니고 타 모델도 없으면 루프 탈출 후 위키 처리
             break
-            
+
         # 쓰기 작업이 완료될 때까지 약간 대기
         time.sleep(1)
         process_file(file_path)
         file_queue.task_done()
-        
+
         # 큐 잔여량 출력
         remaining = file_queue.qsize()
         if remaining > 0:
@@ -743,49 +747,49 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Wiki Agent Daemon and Batch Processor")
     parser.add_argument("--batch", action="store_true", help="Process all files in RAW_DIR sequentially")
     args = parser.parse_args()
-    
+
     os.makedirs(settings.RAW_DIR, exist_ok=True)
-    
+
     # schema.md 존재 검증 (없으면 모든 문서가 compile 단계에서 실패하므로 시작 차단)
     if not os.path.exists(settings.SCHEMA_PATH):
         msg = f"❌ schema.md 파일을 찾을 수 없습니다: {settings.SCHEMA_PATH}"
         print(msg)
         send_discord_notification(f"🚨 **Wiki Agent 시작 실패**\n- 원인: {msg}")
         raise SystemExit(1)
-    
+
     if args.batch:
         files = [f for f in os.listdir(settings.RAW_DIR) if f.endswith(".md")]
         total = len(files)
         print(f"🚀 [배치 모드] 총 {total}개의 마크다운 파일을 감지했습니다. 처리를 시작합니다.")
-        
+
         for i, f_name in enumerate(files, 1):
-            print(f"\n======================================")
+            print("\n======================================")
             print(f"📦 [{i}/{total}] 처리 중: {f_name}")
-            print(f"======================================")
+            print("======================================")
             file_path = os.path.join(settings.RAW_DIR, f_name)
             process_file(file_path)
-            
+
         print("\n✅ 배치 처리가 모두 완료되었습니다.")
-        
+
     else:
         print(f"🚀 [시스템 시작] '{settings.RAW_DIR}' 폴더 감시 데몬이 실행되었습니다. (Ctrl+C 종료)")
-        
+
         # [자동 재개 로직] 기존에 방치된 파일들을 스캔하여 큐에 적재
         existing_files = [f for f in os.listdir(settings.RAW_DIR) if f.endswith(".md")]
         if existing_files:
             print(f"🔍 [자동 재개] 기존 미처리 파일 {len(existing_files)}개를 발견하여 대기열에 추가합니다.")
             for f_name in existing_files:
                 file_queue.put(os.path.join(settings.RAW_DIR, f_name))
-        
+
         # 순차 처리를 위한 백그라운드 워커 실행
         t = threading.Thread(target=worker, daemon=True)
         t.start()
-        
+
         event_handler = RawFolderHandler()
         observer = Observer()
         observer.schedule(event_handler, settings.RAW_DIR, recursive=False)
         observer.start()
-        
+
         try:
             while True:
                 time.sleep(1)

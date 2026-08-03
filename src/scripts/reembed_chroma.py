@@ -4,11 +4,12 @@ import sys
 # 상위 디렉토리(src)를 모듈 검색 경로에 추가
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from config import settings
+
 import chromadb
 from chromadb.utils.embedding_functions import OllamaEmbeddingFunction
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-import datetime
+
+from config import settings
 
 # 1. 시놀로지 NAS ChromaDB 연결
 try:
@@ -46,31 +47,31 @@ total_chunks = 0
 for category, dir_path in target_dirs:
     if not os.path.exists(dir_path):
         continue
-        
+
     md_files = [f for f in os.listdir(dir_path) if f.endswith('.md')]
     if not md_files:
         continue
-        
+
     print(f"\n📂 [{category.upper()}] 폴더 처리 중... ({len(md_files)}개 파일)")
-    
+
     for file_name in md_files:
         file_path = os.path.join(dir_path, file_name)
         try:
             with open(file_path, "r", encoding="utf-8") as f:
                 content = f.read()
-                
+
             chunks = text_splitter.split_text(content)
             base_name = file_name.replace(".md", "")
-            
+
             docs = []
             ids = []
             metadatas = []
-            
+
             for i, chunk in enumerate(chunks):
                 docs.append(chunk)
                 ids.append(f"{base_name}_chunk_{i}")
                 metadatas.append({"category": category, "source": base_name})
-                
+
             if docs:
                 collection.upsert(documents=docs, ids=ids, metadatas=metadatas)
                 total_files += 1

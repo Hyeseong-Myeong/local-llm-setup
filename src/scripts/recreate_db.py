@@ -39,6 +39,7 @@ ollama_ef = embedding_functions.OllamaEmbeddingFunction(
 from chromadb.api.types import Documents, EmbeddingFunction, Embeddings
 from fastembed import TextEmbedding
 
+
 class CustomFastEmbed(EmbeddingFunction):
     def __init__(self, model_name: str = "BAAI/bge-m3"):
         self._model = TextEmbedding(model_name=model_name)

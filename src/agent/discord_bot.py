@@ -1,21 +1,25 @@
+import json
 import os
 import re
 import sys
-import json
-import aiohttp
-import aiofiles
 from urllib.parse import urlparse
+
+import aiofiles
+import aiohttp
 
 # 상위 디렉토리(src)를 모듈 검색 경로에 추가
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import logger_setup
+
 logger_setup.setup_logger('discord_bot.log')
 # pyrefly: ignore [missing-import]
+from datetime import datetime
+
 import discord
 from dotenv import load_dotenv
+
 from config import settings
-from datetime import datetime
 
 load_dotenv()
 
@@ -91,7 +95,7 @@ def _learn_blocked_domain(domain: str):
 @client.event
 async def on_ready():
     print(f"✅ 로그인 완료: {client.user}")
-    print(f"🚀 디스코드 봇이 실행되었습니다. 메시지와 URL을 감시합니다...")
+    print("🚀 디스코드 봇이 실행되었습니다. 메시지와 URL을 감시합니다...")
 
 @client.event
 async def on_message(message):
@@ -154,7 +158,7 @@ async def on_message(message):
 
         if success_count == 0:
             await message.channel.send("⚠️ 모든 URL 스크래핑에 실패했습니다 (403 차단 등 — X/Twitter 같은 사이트는 외부 스크래퍼를 막는 경우가 많습니다). 원본 내용을 가져오지 못해 Wiki Agent가 위키 생성을 건너뜁니다.")
-        
+
     # 빈 메시지 방지
     if not content_to_save.strip():
         return
@@ -166,18 +170,18 @@ async def on_message(message):
     timestamp_str = datetime.now().strftime("%Y%m%d_%H%M%S")
     file_name = f"Discord_{timestamp_str}.md"
     file_path = os.path.join(settings.RAW_DIR, file_name)
-    
+
     os.makedirs(settings.RAW_DIR, exist_ok=True)
     async with aiofiles.open(file_path, "w", encoding="utf-8") as f:
         await f.write(content_to_save)
-        
+
     # 글자 수에 따른 처리 방식 안내 메시지 추가
     text_length = len(content_to_save)
     if text_length <= settings.SPLIT_THRESHOLD:
         method_msg = f"단일 정제 방식(길이: {text_length}자)으로 처리를 시작합니다!"
     else:
         method_msg = f"분할 정제 방식(길이: {text_length}자)으로 안전하게 처리를 시작합니다!"
-        
+
     await message.channel.send(f"✅ 메모가 `{file_name}`으로 RAW 폴더에 저장되었습니다.\n(Wiki Agent가 {method_msg})")
 
 if __name__ == "__main__":
