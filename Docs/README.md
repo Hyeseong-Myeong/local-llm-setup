@@ -19,7 +19,7 @@
   * AMD RX 6600 XT 그래픽 카드의 하드웨어 가속(ROCm)을 사용하기 위해 시스템 부팅 시 `HSA_OVERRIDE_GFX_VERSION=10.3.0` 환경 변수를 강제로 주입하여 GPU 성능을 100% 활용합니다.
 * **ChromaDB (벡터 데이터베이스):**
   * 도커(Docker Desktop) 컨테이너로 구동되며, 문서 검색 시 RAG(검색 증강 생성)를 위한 임베딩 데이터를 저장합니다.
-  * Host: `100.116.28.108:8000`
+  * Host: `.env`의 `CHROMA_HOST` / `CHROMA_PORT`로 설정 (Tailscale IP 사용)
 
 ### 2. 자동화 에이전트 (Wiki Agent & Discord Bot)
 * **`discord_bot.py`:**

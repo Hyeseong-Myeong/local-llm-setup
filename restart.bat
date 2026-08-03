@@ -9,4 +9,4 @@ call shutdown.bat
 
 echo.
 echo [Step 2] Starting services...
-call "C:\Users\mhsjs\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\Startup\ai-server-start.bat"
+call "%USERPROFILE%\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\Startup\ai-server-start.bat"

@@ -158,11 +158,12 @@ models:
 `fastmcp`(Python) 기반 스켈레톤 예시:
 
 ```python
+import os
 from fastmcp import FastMCP
 import chromadb
 
 mcp = FastMCP("obsidian-wiki")
-client = chromadb.HttpClient(host="100.116.28.108", port=8000)
+client = chromadb.HttpClient(host=os.getenv("CHROMA_HOST"), port=int(os.getenv("CHROMA_PORT", 8000)))
 collection = client.get_collection("wiki")
 
 @mcp.tool()

@@ -129,7 +129,7 @@ Open WebUI의 **설정(Settings) > 문서(Documents) / 웹 검색(Web Search)** 
 | **임베딩 검색 우회 (Bypass Embedding Search)** | `Off (비활성화)` | 켜게 되면 로컬 ChromaDB를 이용한 문서 검색(RAG)이 무시됩니다. 로컬 위키 문서 첨부 기능을 쓰려면 반드시 꺼두어야 합니다. |
 | **청크 크기 / 겹침 (Chunk Size / Overlap)** | `1000` / `250` | (추가 권장) 이력서/PDF 업로드 시 한국어 문장이 중간에 잘려 RAG 품질이 떨어지는 것을 막아줍니다. |
 | **웹 콘텐츠 불러오기 생략 (Skip Web Content Fetching)** | `Off (비활성화)` | 켜게 되면 검색 엔진이 주는 1~2줄짜리 짧은 스니펫(미리보기)만 읽고 맙니다. 원문을 딥리딩하게 하려면 반드시 끄세요. |
-| **신뢰 할 수 있는 프록시 환경 (Trusted Proxy Environment)** | `Off (비활성화)` | 고객님의 환경은 개인 로컬 PC(DESKTOP-MHS-HOME)이므로, 외부 프록시 서버(Nginx 등) 우회 설정이 필요하지 않습니다. |
+| **신뢰 할 수 있는 프록시 환경 (Trusted Proxy Environment)** | `Off (비활성화)` | 개인 로컬 PC 환경이므로, 외부 프록시 서버(Nginx 등) 우회 설정이 필요하지 않습니다. |
 | **로더 / 웹 로더 엔진 (Web Loader Engine)** | `Playwright` 또는 `BeautifulSoup` | 자바스크립트 웹사이트를 자주 읽힌다면 `Playwright`를, 가볍고 빠른 스크래핑 위주라면 `BeautifulSoup`을 선택하세요. |
 | **Timeout (요청 대기 시간)** | `15000` (15초) | 사이트가 응답하지 않을 때 채팅이 영원히 멈추는 것을 방지하기 위해 10~15초 사이로 제한하는 것이 좋습니다. |
 | **SSL 인증서 확인 (Verify SSL Certificate)** | `On (활성화)` | 보안을 위해 켜두는 것이 기본입니다. (단, 자체 인증서를 쓰는 사내 로컬 사이트를 긁어와야 한다면 끄세요.) |
