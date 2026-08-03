@@ -1,0 +1,92 @@
+providers:
+  ollama:
+    type: ollama
+    base_url: "http://host.docker.internal:11434"
+  gemini:
+    type: gemini
+    api_key: "${GEMINI_API_KEY}"
+  groq:
+    type: openai
+    base_url: "https://api.groq.com/openai/v1"
+    api_key: "${GROQ_API_KEY}"
+  cerebras:
+    type: openai
+    base_url: "https://api.cerebras.ai/v1"
+    api_key: "${CEREBRAS_API_KEY}"
+  mistral:
+    type: mistral
+    api_key: "${MISTRAL_API_KEY}"
+  anthropic:
+    type: anthropic
+    api_key: "${ANTHROPIC_API_KEY}"
+
+models:
+  # Base Local
+  qwen3.5:9b:
+    provider: ollama
+    model: qwen3.5:9b
+  # Coder Local
+  qwen2.5-coder:7b:
+    provider: ollama
+    model: qwen2.5-coder:7b
+  # Vision Local
+  gemma4:e4b:
+    provider: ollama
+    model: gemma4:e4b
+  # Embedding Local
+  bge-m3:
+    provider: ollama
+    model: bge-m3
+  # RAG Fallback Local
+  exaone4.0:1.2b:
+    provider: ollama
+    model: exaone4.0:1.2b
+  # Interview Local
+  deepseek-r1:14b:
+    provider: ollama
+    model: deepseek-r1:14b
+  # Cloud
+  gemini-1.5-pro:
+    provider: gemini
+    model: gemini-1.5-pro-latest
+  gemini-1.5-flash:
+    provider: gemini
+    model: gemini-1.5-flash-latest
+  llama3-70b-8192:
+    provider: groq
+    model: llama3-70b-8192
+  llama3.1-70b:
+    provider: cerebras
+    model: llama-3.1-70b
+  codestral-latest:
+    provider: mistral
+    model: codestral-latest
+  claude-3-5-sonnet-20240620:
+    provider: anthropic
+    model: claude-3-5-sonnet-20240620
+
+virtual_keys:
+  - id: vk_desktop_main
+    name: "Desktop Main Key"
+    description: "Main key for local development and agents"
+    provider_configs:
+      - provider: ollama
+        allowed_models: ["*"]
+      - provider: gemini
+        allowed_models: ["*"]
+      - provider: groq
+        allowed_models: ["*"]
+      - provider: cerebras
+        allowed_models: ["*"]
+      - provider: mistral
+        allowed_models: ["*"]
+      - provider: anthropic
+        allowed_models: ["*"]
+
+tracing:
+  service_name: "bifrost-gateway"
+  collector_url: "${LANGFUSE_BASE_URL}/api/public/otel/v1/traces"
+  trace_type: "genai_extension"
+  protocol: "http"
+  headers:
+    Authorization: "Basic ${LANGFUSE_AUTH_B64}"
