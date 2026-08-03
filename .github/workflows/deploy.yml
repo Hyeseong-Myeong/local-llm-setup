@@ -1,0 +1,22 @@
+name: Deploy Update
+
+# self-hosted runner(사용자 PC)에서 실행되어 실행 중인 로컬 스택을 최신 main으로
+# 갱신합니다. 배포 대상 디렉토리(C:\local_LLM)가 개발 작업 디렉토리와 동일하므로,
+# 커밋되지 않은 변경사항이 있으면 scripts/deploy_update.ps1이 안전하게 배포를 건너뜁니다.
+# 필요한 리포지토리 시크릿: DISCORD_WEBHOOK_URL
+# self-hosted runner가 등록되어 있지 않으면 이 job은 대기만 하고 실행되지 않습니다.
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    runs-on: self-hosted
+    steps:
+      - name: Run deploy script
+        shell: powershell
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: |
+          & "C:\local_LLM\scripts\deploy_update.ps1"
