@@ -8,3 +8,11 @@ select = ["E", "F", "W", "I"]
 # E402: 각 스크립트가 sys.path.append(...)로 상위 디렉토리를 모듈 검색 경로에
 # 추가한 뒤 import하는 의도된 패턴을 쓰고 있어 제외한다.
 ignore = ["E402"]
+
+[tool.ruff.lint.per-file-ignores]
+# 한국어 로그/프롬프트 문자열이 많아 줄바꿈이 오히려 가독성을 해치는 파일들만
+# E501(line-too-long)을 예외 처리한다.
+"src/agent/discord_bot.py" = ["E501"]
+"src/agent/wiki_agent.py" = ["E501"]
+"src/prompts.py" = ["E501"]
+"src/tools/fastapi_wiki_server.py" = ["E501"]
