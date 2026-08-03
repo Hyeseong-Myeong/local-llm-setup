@@ -1,0 +1,33 @@
+name: Performance Benchmark
+
+# 주의: impact-analysis.yml과 동일하게 Bifrost는 Tailscale 사설망에서만
+# 접근 가능하므로 self-hosted runner가 필요합니다.
+# 필요한 리포지토리 시크릿: BIFROST_BASE_URL, BIFROST_API_KEY
+
+on:
+  pull_request:
+    types: [labeled]
+  workflow_dispatch: {}
+  schedule:
+    - cron: "0 4 * * 1" # 매주 월요일 04:00 UTC
+
+jobs:
+  benchmark:
+    if: github.event_name != 'pull_request' || github.event.label.name == 'perf'
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install requests
+
+      - name: Run benchmark
+        env:
+          BIFROST_BASE_URL: ${{ secrets.BIFROST_BASE_URL }}
+          BIFROST_API_KEY: ${{ secrets.BIFROST_API_KEY }}
+        run: python scripts/benchmark_bifrost.py
