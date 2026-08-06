@@ -91,9 +91,6 @@ jobs:
     if: github.event_name == 'pull_request' && github.event.action != 'labeled'
     needs: [secret-scan, lint, codeql]
     runs-on: self-hosted
-    permissions:
-      contents: read
-      issues: write
     defaults:
       run:
         # AllSigned(LocalMachine)에 막히는 GitHub 임시 래퍼 스크립트를
@@ -111,7 +108,6 @@ jobs:
         env:
           BASE_REF: ${{ github.base_ref }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           BIFROST_BASE_URL: ${{ secrets.BIFROST_BASE_URL }}
           BIFROST_API_KEY: ${{ secrets.BIFROST_API_KEY }}
         run: |

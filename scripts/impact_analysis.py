@@ -1,4 +1,4 @@
-"""PR diff를 Bifrost 경유 LLM에 보내 영향도를 분석하고 PR 코멘트로 게시한다."""
+"""PR diff를 Bifrost 경유 LLM에 보내 영향도를 분석하고 Job Summary에 남긴다."""
 import os
 import subprocess
 import sys
@@ -55,23 +55,15 @@ def analyze(diff: str) -> str:
     return resp.json()["choices"][0]["message"]["content"]
 
 
-def post_comment(body: str) -> None:
-    repo = os.environ["GITHUB_REPOSITORY"]
-    pr_number = os.environ["PR_NUMBER"]
-    token = os.environ["GITHUB_TOKEN"]
-
-    resp = requests.post(
-        f"https://api.github.com/repos/{repo}/issues/{pr_number}/comments",
-        headers={
-            "Authorization": f"Bearer {token}",
-            "Accept": "application/vnd.github+json",
-        },
-        json={"body": f"## \U0001f50d AI 영향도 분석\n\n{body}"},
-        timeout=30,
-    )
-    if not resp.ok:
-        print(f"GitHub API response ({resp.status_code}): {resp.text}", file=sys.stderr)
-    resp.raise_for_status()
+def write_summary(body: str) -> None:
+    pr_number = os.environ.get("PR_NUMBER", "?")
+    summary_path = os.environ.get("GITHUB_STEP_SUMMARY")
+    heading = f"## \U0001f50d AI 영향도 분석 (PR #{pr_number})\n\n{body}\n"
+    if not summary_path:
+        print(heading)
+        return
+    with open(summary_path, "a", encoding="utf-8") as f:
+        f.write(heading)
 
 
 def main() -> None:
@@ -81,8 +73,8 @@ def main() -> None:
         print("No diff detected, skipping analysis.")
         return
     analysis = analyze(diff)
-    post_comment(analysis)
-    print("Impact analysis posted.")
+    write_summary(analysis)
+    print("Impact analysis written to job summary.")
 
 
 if __name__ == "__main__":
