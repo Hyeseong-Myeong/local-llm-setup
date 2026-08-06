@@ -375,3 +375,30 @@ EXAONE 같은 8B 체급 소형 모델은 이 '숨겨진 강제 출처 표기 지
   2. **VRAM 비우기 확인 대기 (`wait_for_vram_clear`):** 퇴거 후 `ollama ps` API를 최대 10초간 1초 간격 폴링하여, GPU 드라이버의 물리적 메모리 해제가 완료된 것을 확인한 후에만 다음 단계로 진행하도록 수정.
   3. **자가 치유 (`process_file` Auto-Healing):** 500 에러(OOM/좀비) 감지 시 좀비 사살 → VRAM 해제 대기 → **1회 자동 재시도**. 재시도도 실패하면 Error 폴더로 이동. 디스코드에 자가 치유 가동/성공/실패 알림 전송.
 
+---
+
+## 12. 🔒 [2026-08-06] Self-hosted runner PowerShell 실행 정책(AllSigned) 차단 해결 로그
+
+### 🔴 증상: `deploy`와 `impact-analysis` job이 "not digitally signed" 에러로 실패
+* **증상:** self-hosted runner에서 `deploy_update.ps1`을 실행하는 `deploy` job이 실패. 에러 메시지는 다음과 같음.
+  > `File C:\actions-runner\_work\_temp\<guid>.ps1 cannot be loaded. The file ... is not digitally signed. You cannot run this script on the current system.`
+* **추가 증상:** 같은 러너에서 `actions/setup-python`을 쓰는 `impact-analysis`, `performance` job도 동일한 에러로 실패. 심지어 GitHub이 `-ExecutionPolicy Unrestricted`를 명시해서 실행한 압축 해제 스텝은 통과했는데, 그 직후 `setup-python`이 내부적으로 `./setup.ps1`을 dot-source 방식으로 실행하는 스텝에서 같은 에러가 재발함.
+
+### 🤔 원인
+* `Get-ExecutionPolicy -List`로 확인한 결과, 이 PC의 **`LocalMachine` 범위 정책이 `AllSigned`**로 설정되어 있었음 (Windows 기본값인 `Restricted`보다도 엄격 — 로컬에서 만든 스크립트조차 신뢰할 수 있는 게시자 서명이 없으면 전부 차단).
+* GitHub Actions는 `run:` 스텝을 실행할 때마다 그 내용을 담은 **임시 `.ps1` 파일을 새로 생성**해서 `powershell -command ". '{0}'"` (dot-sourcing) 방식으로 실행함. 이 임시 파일은 실행 직전에 생성되고 끝나면 삭제되는 구조라, **미리 서명해둘 수 있는 대상이 아님**.
+* `actions/setup-python`이 내부적으로 실행하는 `setup.ps1` 역시 같은 방식(dot-source)으로 호출되어 동일하게 차단됨. 즉 우리 스크립트만의 문제가 아니라 **이 러너에서 도는 모든 PowerShell 기반 CI 스텝이 구조적으로 막혀 있었음**.
+
+### 🟢 해결 (머신 전체 정책은 건드리지 않는 방향으로 선택)
+`Set-ExecutionPolicy -Scope LocalMachine`으로 머신 전체 정책을 완화하는 방법도 검토했으나(가장 간단하지만 이 PC의 다른 모든 계정·서비스에도 영향), **우리 워크플로 범위로만 한정되는 방법을 최종 채택**함.
+
+1. **좁은 범위 우회 (`shell:` 커스텀 지정):** `pipeline.yml`의 self-hosted job들(`deploy`, `impact-analysis`, `performance`)에서 `run:` 스텝의 `shell`을 다음과 같이 지정.
+   ```yaml
+   shell: powershell -ExecutionPolicy Bypass -File "{0}"
+   ```
+   `-File`로 실행하며 `-ExecutionPolicy Bypass`를 그 프로세스 호출 하나에만 적용 — 레지스트리(`LocalMachine` 정책)는 전혀 건드리지 않음.
+2. **`actions/setup-python` 제거:** 이 서드파티 액션 내부의 `setup.ps1`은 우리 워크플로의 `shell:` 설정이 미치지 않는 범위라 위 방법으로 고칠 수 없음. 대신 이 러너 PC에 이미 있는 `C:\local_LLM\venv\Scripts\python.exe`(필요 패키지 `requests` 기설치됨)를 절대경로로 직접 호출하도록 변경해서, 애초에 `setup-python`을 쓰지 않도록 우회.
+3. **`performance` job은 `actions/checkout`도 제거:** 벤치마크가 측정하는 건 PR의 코드가 아니라 지금 떠 있는 Bifrost 게이트웨이의 실제 응답 속도라 PR diff와 무관함. `C:\local_LLM`에 있는(항상 최신 main인) 스크립트를 checkout 없이 바로 실행하도록 단순화.
+
+**참고:** 코드 서명(Authenticode)으로 해결하는 방법도 검토했으나, 차단되는 대상이 우리가 만든 스크립트가 아니라 GitHub이 그때그때 즉석 생성하는 임시 래퍼 파일이라 애초에 서명이 불가능한 구조임을 확인하고 제외함.
+
