@@ -421,7 +421,18 @@ EXAONE 같은 8B 체급 소형 모델은 이 '숨겨진 강제 출처 표기 지
 * **추가 발견:** provider를 명시해도 `model_decommissioned` 에러 발생 — Groq가 `llama3-70b-8192`를 이미 단종시킴.
 * **해결:** `scripts/impact_analysis.py`의 기본 모델을 현재 Groq에서 서빙 중인 `groq/openai/gpt-oss-120b`로 교체. (참고: Ollama 로컬 모델은 provider가 하나뿐이라 `qwen3.5:9b`처럼 bare 이름으로도 정상 라우팅됨 — `benchmark_bifrost.py`는 수정 불필요.)
 
+### 🔴 증상 4: `403 Forbidden` → `"Resource not accessible by integration"` (PR 코멘트 게시)
+* **원인:** public 레포에서 `pull_request` 이벤트로 트리거되는 워크플로는 GitHub이 보안상 `GITHUB_TOKEN`을 강제로 제한함. 워크플로 YAML의 `permissions: issues: write`나 리포지토리 차원의 "Workflow permissions: Read and write" 설정을 모두 켜도, self-hosted runner + `pull_request` 조합에서는 상한이 올라가지 않고 계속 거부됨.
+* **해결 (기능 자체를 재설계):** `GITHUB_TOKEN` 대신 별도 PAT를 쓰는 우회도 가능하지만, 채택하지 않음. 대신 **PR 코멘트 게시를 포기하고 GitHub Actions의 Job Summary(`$GITHUB_STEP_SUMMARY`)에 결과를 남기는 방식으로 전환** — 추가 권한이나 시크릿이 전혀 필요 없고, Actions 실행 화면에서 바로 확인 가능함. `post_comment()`를 제거하고 `write_summary()`로 교체, 워크플로에서 `permissions:`와 `GITHUB_TOKEN` env를 모두 제거.
+
+### 🔴 증상 5 (사전 발견, 사후 검토로 예방): git "detected dubious ownership in repository"
+* **증상:** 아직 실제로 발생하진 않았으나, `deploy` job이 원인 불명으로 조기 종료된 이전 실패 사례를 재검토하던 중 발견.
+* **원인:** `deploy_update.ps1`은 `C:\local_LLM`(대화형 사용자 소유)에서 직접 git 명령을 실행하는데, 러너 서비스 계정(`NETWORK SERVICE`)에는 `.gitconfig` 자체가 없어(확인 완료: `C:\Windows\ServiceProfiles\NetworkService\.gitconfig` 없음) 이 디렉토리에 대한 `safe.directory` 신뢰 등록이 전혀 안 되어 있었음. Git은 소유자가 다른 저장소에서 명령을 실행하면 기본적으로 "dubious ownership" 에러로 거부함.
+* **해결:** `deploy_update.ps1` 최상단에서 매 실행마다 `git config --global --add safe.directory $RepoPath`를 멱등하게 실행하도록 추가. 같은 검토 과정에서 `git fetch` 실패 시 `$LASTEXITCODE`를 확인하지 않고 그대로 진행하던 부분도 함께 발견해, `git merge --ff-only`와 동일한 패턴의 실패 처리(디스코드 알림 + 중단)를 추가함.
+
 ### 🟢 교훈
 * GitHub Secrets는 값을 조회할 수 없으므로, 연동 실패 시 **같은 요청을 로컬에서 직접 재현**(`curl -X POST http://127.0.0.1:8080/...`)해서 코드/설정 중 어느 쪽 문제인지 빠르게 좁히는 것이 효율적이었음.
 * 외부 API 모델명은 공급사가 예고 없이 단종시킬 수 있으므로, 코드에 하드코딩된 기본값도 정기적으로 점검이 필요함.
+* self-hosted runner + `pull_request` 조합에서 `GITHUB_TOKEN` 쓰기 권한은 리포지토리 설정으로 못 푸는 플랫폼 차원의 제약일 수 있음 — 안 되면 권한을 더 파는 대신 **애초에 그 권한이 필요 없는 방식(Job Summary 등)으로 설계를 바꾸는 것**이 더 빠른 해결책이었음.
+* 매번 실행 후 에러를 하나씩 고치는 대신, **관련 파일 전체를 처음부터 끝까지 정독하며 잠재적 문제를 한 번에 찾아 고치는 방식**으로 전환한 뒤 증상 5(safe.directory)를 실제 실패가 나기 전에 미리 발견함.
 
