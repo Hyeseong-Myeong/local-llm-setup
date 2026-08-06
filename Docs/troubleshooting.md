@@ -402,3 +402,26 @@ EXAONE 같은 8B 체급 소형 모델은 이 '숨겨진 강제 출처 표기 지
 
 **참고:** 코드 서명(Authenticode)으로 해결하는 방법도 검토했으나, 차단되는 대상이 우리가 만든 스크립트가 아니라 GitHub이 그때그때 즉석 생성하는 임시 래퍼 파일이라 애초에 서명이 불가능한 구조임을 확인하고 제외함.
 
+---
+
+## 13. 🌐 [2026-08-06] `impact_analysis.py` — 인코딩 에러 및 Bifrost 모델 라우팅 에러 해결 로그
+
+실행 정책 문제(12번)를 해결한 뒤에도 `impact-analysis` job이 3번 더 다른 이유로 실패해서, 하나씩 원인을 좁혀나간 기록.
+
+### 🔴 증상 1: `UnicodeDecodeError` → `Impact analysis failed: object of type 'NoneType' has no len()`
+* **원인:** `subprocess.run(["git", "diff", ...], capture_output=True, text=True)`에서 `encoding`을 지정하지 않으면 Windows에서는 OS 로케일(이 러너는 한국어 Windows라 `cp949`)로 출력을 디코딩함. 코드베이스 곳곳의 한글 주석/문자열이 포함된 diff는 UTF-8인데 `cp949`로는 디코딩이 안 되어 `subprocess`의 백그라운드 리더 스레드 안에서 `UnicodeDecodeError`가 발생. 이 예외가 메인 스레드까지 정상 전파되지 않고 `result.stdout`이 `None`으로 남아, 그다음 `len(diff)` 호출에서 엉뚱한 `NoneType` 에러로 나타남 (진짜 원인은 로그에 묻혀 있었음).
+* **해결:** `subprocess.run(..., encoding="utf-8", errors="replace")`로 인코딩을 명시.
+
+### 🔴 증상 2: `405 Client Error: Method Not Allowed for url: .../v1/chat/completions`
+* **원인:** 로컬(`127.0.0.1:8080`)에서 같은 경로로 직접 테스트하니 정상(POST 시 400)이었음 → 코드나 Bifrost 자체 문제가 아니라 **`BIFROST_BASE_URL` 리포지토리 시크릿 값이 실제 게이트웨이 주소가 아닌 다른 값**으로 설정되어 있었던 것으로 확인.
+* **해결:** self-hosted runner가 Bifrost와 같은 PC에 있으므로 Tailscale IP 등을 거칠 필요 없이 시크릿 값을 `http://127.0.0.1:8080`으로 수정.
+
+### 🔴 증상 3: `400 Client Error: Bad Request` → `"could not auto resolve a provider for the request"`
+* **원인:** Bifrost에 모델명을 bare로(`llama3-70b-8192`) 보내면 여러 provider에 동일 이름이 등록되어 있을 경우 자동 라우팅이 모호해져 거부됨. `groq/llama3-70b-8192`처럼 **provider를 접두사로 명시**해야 함.
+* **추가 발견:** provider를 명시해도 `model_decommissioned` 에러 발생 — Groq가 `llama3-70b-8192`를 이미 단종시킴.
+* **해결:** `scripts/impact_analysis.py`의 기본 모델을 현재 Groq에서 서빙 중인 `groq/openai/gpt-oss-120b`로 교체. (참고: Ollama 로컬 모델은 provider가 하나뿐이라 `qwen3.5:9b`처럼 bare 이름으로도 정상 라우팅됨 — `benchmark_bifrost.py`는 수정 불필요.)
+
+### 🟢 교훈
+* GitHub Secrets는 값을 조회할 수 없으므로, 연동 실패 시 **같은 요청을 로컬에서 직접 재현**(`curl -X POST http://127.0.0.1:8080/...`)해서 코드/설정 중 어느 쪽 문제인지 빠르게 좁히는 것이 효율적이었음.
+* 외부 API 모델명은 공급사가 예고 없이 단종시킬 수 있으므로, 코드에 하드코딩된 기본값도 정기적으로 점검이 필요함.
+
