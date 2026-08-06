@@ -14,6 +14,8 @@ def get_diff(base_ref: str) -> str:
         ["git", "diff", f"origin/{base_ref}...HEAD"],
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         check=True,
     )
     diff = result.stdout
