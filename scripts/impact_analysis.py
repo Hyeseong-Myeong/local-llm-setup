@@ -27,7 +27,10 @@ def get_diff(base_ref: str) -> str:
 def analyze(diff: str) -> str:
     bifrost_url = os.environ["BIFROST_BASE_URL"].rstrip("/")
     bifrost_key = os.environ["BIFROST_API_KEY"]
-    model = os.environ.get("IMPACT_ANALYSIS_MODEL", "llama3-70b-8192")
+    # Bifrost 모델명은 provider를 명시해야 자동 라우팅이 모호해지지 않는다
+    # (bare "llama3-70b-8192"는 "could not auto resolve a provider" 오류 발생).
+    # groq/llama3-70b-8192는 Groq 측에서 단종되어 groq/openai/gpt-oss-120b로 교체.
+    model = os.environ.get("IMPACT_ANALYSIS_MODEL", "groq/openai/gpt-oss-120b")
 
     prompt = (
         "다음은 하나의 Pull Request의 전체 diff입니다. "
