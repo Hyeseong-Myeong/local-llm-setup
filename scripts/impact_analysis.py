@@ -1,4 +1,4 @@
-"""PR diff를 Bifrost 경유 LLM에 보내 영향도를 분석하고 PR 코멘트로 게시한다."""
+"""PR diff를 Bifrost 경유 LLM에 보내 영향도를 분석하고 Job Summary에 남긴다."""
 import os
 import subprocess
 import sys
@@ -14,6 +14,8 @@ def get_diff(base_ref: str) -> str:
         ["git", "diff", f"origin/{base_ref}...HEAD"],
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         check=True,
     )
     diff = result.stdout
@@ -25,7 +27,10 @@ def get_diff(base_ref: str) -> str:
 def analyze(diff: str) -> str:
     bifrost_url = os.environ["BIFROST_BASE_URL"].rstrip("/")
     bifrost_key = os.environ["BIFROST_API_KEY"]
-    model = os.environ.get("IMPACT_ANALYSIS_MODEL", "llama3-70b-8192")
+    # Bifrost 모델명은 provider를 명시해야 자동 라우팅이 모호해지지 않는다
+    # (bare "llama3-70b-8192"는 "could not auto resolve a provider" 오류 발생).
+    # groq/llama3-70b-8192는 Groq 측에서 단종되어 groq/openai/gpt-oss-120b로 교체.
+    model = os.environ.get("IMPACT_ANALYSIS_MODEL", "groq/openai/gpt-oss-120b")
 
     prompt = (
         "다음은 하나의 Pull Request의 전체 diff입니다. "
@@ -50,21 +55,15 @@ def analyze(diff: str) -> str:
     return resp.json()["choices"][0]["message"]["content"]
 
 
-def post_comment(body: str) -> None:
-    repo = os.environ["GITHUB_REPOSITORY"]
-    pr_number = os.environ["PR_NUMBER"]
-    token = os.environ["GITHUB_TOKEN"]
-
-    resp = requests.post(
-        f"https://api.github.com/repos/{repo}/issues/{pr_number}/comments",
-        headers={
-            "Authorization": f"Bearer {token}",
-            "Accept": "application/vnd.github+json",
-        },
-        json={"body": f"## \U0001f50d AI 영향도 분석\n\n{body}"},
-        timeout=30,
-    )
-    resp.raise_for_status()
+def write_summary(body: str) -> None:
+    pr_number = os.environ.get("PR_NUMBER", "?")
+    summary_path = os.environ.get("GITHUB_STEP_SUMMARY")
+    heading = f"## \U0001f50d AI 영향도 분석 (PR #{pr_number})\n\n{body}\n"
+    if not summary_path:
+        print(heading)
+        return
+    with open(summary_path, "a", encoding="utf-8") as f:
+        f.write(heading)
 
 
 def main() -> None:
@@ -74,8 +73,8 @@ def main() -> None:
         print("No diff detected, skipping analysis.")
         return
     analysis = analyze(diff)
-    post_comment(analysis)
-    print("Impact analysis posted.")
+    write_summary(analysis)
+    print("Impact analysis written to job summary.")
 
 
 if __name__ == "__main__":

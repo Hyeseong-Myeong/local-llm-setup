@@ -28,6 +28,11 @@ function Test-StackHealthy {
 
 Set-Location $RepoPath
 
+# 러너 서비스 계정(NETWORK SERVICE)은 대화형 사용자가 소유한 이 디렉토리를
+# 신뢰(safe.directory)하지 않은 상태라 모든 git 명령이 "detected dubious
+# ownership" 에러로 실패할 수 있다. 매번 멱등하게 등록해 방지한다.
+git config --global --add safe.directory $RepoPath
+
 $dirty = git status --porcelain
 if ($dirty) {
     Send-DiscordNotice "⚠️ 배포 중단: $RepoPath 에 커밋되지 않은 변경사항이 있어 자동 배포를 건너뜁니다."
@@ -41,6 +46,11 @@ git tag $rollbackTag $previousCommit
 
 Write-Host "Fetching latest main..."
 git fetch origin main
+if ($LASTEXITCODE -ne 0) {
+    Send-DiscordNotice "⚠️ 배포 중단: origin/main fetch에 실패했습니다 (네트워크 문제일 수 있음)."
+    git tag -d $rollbackTag | Out-Null
+    exit 1
+}
 
 git merge --ff-only origin/main
 if ($LASTEXITCODE -ne 0) {
