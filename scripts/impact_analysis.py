@@ -69,6 +69,8 @@ def post_comment(body: str) -> None:
         json={"body": f"## \U0001f50d AI 영향도 분석\n\n{body}"},
         timeout=30,
     )
+    if not resp.ok:
+        print(f"GitHub API response ({resp.status_code}): {resp.text}", file=sys.stderr)
     resp.raise_for_status()
 
 
