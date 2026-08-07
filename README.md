@@ -51,6 +51,9 @@ Bifrost 게이트웨이를 통해 클라우드 API로 폴백합니다.
 ## 레포 구조
 
 ```
+├── .github/
+│   ├── workflows/pipeline.yml  # CI/CD: secret-scan/lint/codeql(병렬) → impact-analysis/deploy, performance(독립)
+│   └── dependabot.yml           # pip/github-actions/bifrost docker 이미지 자동 업데이트
 ├── bifrost/            # Bifrost 게이트웨이 설정 (bifrost.yaml, docker-compose.yml, start_bifrost.py)
 ├── src/
 │   ├── agent/          # discord_bot.py, wiki_agent.py
@@ -59,10 +62,11 @@ Bifrost 게이트웨이를 통해 클라우드 API로 폴백합니다.
 │   ├── config.py        # .env 기반 설정 (pydantic-settings)
 │   ├── logger_setup.py  # UTF-8 안전 로거 + 로테이션
 │   └── prompts.py       # Wiki Agent 분류/컴파일 프롬프트
+├── scripts/             # CI/CD 보조 스크립트 (impact_analysis.py, benchmark_bifrost.py, deploy_update.ps1)
 ├── archive/             # 폐기된 이전 구현체 (참고용)
 ├── Docs/                # 아키텍처, 튜닝 가이드, 트러블슈팅 로그, 로드맵
-├── restart.bat / shutdown.bat  # 백그라운드 프로세스 및 Bifrost 컨테이너 재시작/종료
-└── Modelfile_qwen       # Ollama 커스텀 모델 정의
+├── requirements.txt / pyproject.toml  # 의존성 명세 및 ruff lint 설정
+└── restart.bat / shutdown.bat  # 백그라운드 프로세스 및 Bifrost 컨테이너 재시작/종료
 ```
 
 ## 설치 및 실행

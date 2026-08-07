@@ -187,12 +187,21 @@ class AgentState(TypedDict):
 # ==========================================
 # 노드 1: 분류기 (Tech vs Personal) + 짧은 문서는 정제까지 통합
 # ==========================================
+def _normalize_category(raw: str) -> str:
+    """분류 결과를 tech/career/personal 중 하나로 정규화. 셋 다 아니면 안전 기본값(tech)."""
+    value = raw.strip().lower()
+    if "personal" in value:
+        return "personal"
+    if "career" in value:
+        return "career"
+    return "tech"
+
 def _parse_classify_and_clean(raw_response: str) -> tuple:
     """'CATEGORY: tech\\n---\\n(본문)' 형식을 파싱. 형식이 어긋나면 전체를 본문으로,
     카테고리는 안전 기본값(tech)으로 취급한다."""
     match = re.match(r'^\s*CATEGORY:\s*(\w+)\s*\n-{3,}\s*\n(.*)$', raw_response, re.DOTALL | re.IGNORECASE)
     if match:
-        category = "personal" if "personal" in match.group(1).strip().lower() else "tech"
+        category = _normalize_category(match.group(1))
         cleaned = match.group(2).strip()
         return category, cleaned
     return "tech", raw_response.strip()
@@ -221,12 +230,11 @@ def classify_document(state: AgentState) -> AgentState:
         # 긴 문서는 청크 단위로 정제되므로 분류를 위한 별도의 가벼운 미리보기 호출만 수행
         prompt = prompts.CLASSIFY_PROMPT.format(raw_content_preview=raw_text[:1000])
         messages = [
-            SystemMessage(content="You are a document classifier. Output ONLY one word: tech or personal."),
+            SystemMessage(content="You are a document classifier. Output ONLY one word: tech, career, or personal."),
             HumanMessage(content=prompt)
         ]
         response = llm.invoke(messages)
-        category = response.content.strip().lower()
-        state['category'] = "personal" if "personal" in category else "tech"
+        state['category'] = _normalize_category(response.content)
 
     return state
 # ==========================================
