@@ -30,3 +30,6 @@ logs/*
 # Windows
 Thumbs.db
 Desktop.ini
+
+# Local scratch files (never commit — may contain personal network/infra info)
+tmp/

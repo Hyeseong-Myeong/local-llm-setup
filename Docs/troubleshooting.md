@@ -430,9 +430,15 @@ EXAONE 같은 8B 체급 소형 모델은 이 '숨겨진 강제 출처 표기 지
 * **원인:** `deploy_update.ps1`은 `C:\local_LLM`(대화형 사용자 소유)에서 직접 git 명령을 실행하는데, 러너 서비스 계정(`NETWORK SERVICE`)에는 `.gitconfig` 자체가 없어(확인 완료: `C:\Windows\ServiceProfiles\NetworkService\.gitconfig` 없음) 이 디렉토리에 대한 `safe.directory` 신뢰 등록이 전혀 안 되어 있었음. Git은 소유자가 다른 저장소에서 명령을 실행하면 기본적으로 "dubious ownership" 에러로 거부함.
 * **해결:** `deploy_update.ps1` 최상단에서 매 실행마다 `git config --global --add safe.directory $RepoPath`를 멱등하게 실행하도록 추가. 같은 검토 과정에서 `git fetch` 실패 시 `$LASTEXITCODE`를 확인하지 않고 그대로 진행하던 부분도 함께 발견해, `git merge --ff-only`와 동일한 패턴의 실패 처리(디스코드 알림 + 중단)를 추가함.
 
+### 🔴 증상 6: `deploy` job이 PowerShell 파싱 에러로 실패 (`main` 최초 실전 배포 시도)
+* **증상:** `The string is missing the terminator: "."`, `Missing closing '}' in statement block` — `deploy_update.ps1`의 한글 문자열이 깨진 채로 파서 에러 발생 (`??諛고룷 ?ㅽ뙣 -> 濡ㅻ갚 ?꾨즺...` 처럼 로그에 완전히 깨진 텍스트로 출력됨).
+* **원인:** `deploy_update.ps1` 파일에 **UTF-8 BOM이 없었음**. self-hosted 러너가 `run:` 스텝을 실행하는 `powershell.exe`는 **Windows PowerShell 5.1**(pwsh 7이 아님)인데, 이 버전은 BOM 없는 `.ps1` 파일을 UTF-8이 아니라 시스템 코드페이지(한국어 Windows라 cp949)로 읽는다. 그 결과 파일 안의 한글(주석, 디스코드 알림 문자열)이 깨지면서 문자열 안에 포함된 백틱/따옴표까지 오염되어, 파서가 문자열/블록의 끝을 못 찾고 실패함.
+* **해결:** 파일 맨 앞에 UTF-8 BOM(`EF BB BF`)을 추가. `[System.Management.Automation.Language.Parser]::ParseFile()`로 실행 없이 문법만 파싱해 로컬에서 먼저 검증한 뒤 push. 저장소 내 다른 `.ps1` 파일이 있는지도 함께 확인(없음 — 현재는 `deploy_update.ps1`이 유일).
+
 ### 🟢 교훈
 * GitHub Secrets는 값을 조회할 수 없으므로, 연동 실패 시 **같은 요청을 로컬에서 직접 재현**(`curl -X POST http://127.0.0.1:8080/...`)해서 코드/설정 중 어느 쪽 문제인지 빠르게 좁히는 것이 효율적이었음.
 * 외부 API 모델명은 공급사가 예고 없이 단종시킬 수 있으므로, 코드에 하드코딩된 기본값도 정기적으로 점검이 필요함.
 * self-hosted runner + `pull_request` 조합에서 `GITHUB_TOKEN` 쓰기 권한은 리포지토리 설정으로 못 푸는 플랫폼 차원의 제약일 수 있음 — 안 되면 권한을 더 파는 대신 **애초에 그 권한이 필요 없는 방식(Job Summary 등)으로 설계를 바꾸는 것**이 더 빠른 해결책이었음.
 * 매번 실행 후 에러를 하나씩 고치는 대신, **관련 파일 전체를 처음부터 끝까지 정독하며 잠재적 문제를 한 번에 찾아 고치는 방식**으로 전환한 뒤 증상 5(safe.directory)를 실제 실패가 나기 전에 미리 발견함.
+* 한글이 포함된 `.ps1` 파일은 **반드시 UTF-8 BOM으로 저장**해야 Windows PowerShell 5.1에서 안전하게 파싱됨 — 텍스트 에디터/도구가 기본적으로 BOM 없는 UTF-8을 쓰는 경우가 많아 놓치기 쉬운 함정.
 
