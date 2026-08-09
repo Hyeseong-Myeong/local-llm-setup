@@ -10,7 +10,10 @@ function Send-DiscordNotice {
     if (-not $WebhookUrl) { return }
     try {
         $body = @{ content = $Message } | ConvertTo-Json -Compress
-        Invoke-RestMethod -Uri $WebhookUrl -Method Post -ContentType "application/json" -Body $body | Out-Null
+        # Windows PowerShell 5.1의 Invoke-RestMethod는 문자열 -Body를 시스템 코드페이지로
+        # 인코딩해서 보내므로, 한글이 깨지지 않도록 UTF-8 바이트로 직접 인코딩해서 넘긴다.
+        $bodyBytes = [System.Text.Encoding]::UTF8.GetBytes($body)
+        Invoke-RestMethod -Uri $WebhookUrl -Method Post -ContentType "application/json; charset=utf-8" -Body $bodyBytes | Out-Null
     } catch {
         Write-Warning "Discord 알림 전송 실패: $_"
     }
@@ -29,9 +32,15 @@ function Test-StackHealthy {
 Set-Location $RepoPath
 
 # 러너 서비스 계정(NETWORK SERVICE)은 대화형 사용자가 소유한 이 디렉토리를
-# 신뢰(safe.directory)하지 않은 상태라 모든 git 명령이 "detected dubious
-# ownership" 에러로 실패할 수 있다. 매번 멱등하게 등록해 방지한다.
-git config --global --add safe.directory $RepoPath
+# 신뢰(safe.directory)하지 않은 상태라 모든 git 명령이 "unsafe repository"
+# 에러로 실패할 수 있다. --global은 이 서비스 계정에 정상적인 HOME이 없어서
+# 조용히 반영되지 않았음(실측 확인됨). --system은 Git 설치 폴더(Program Files)
+# 쓰기 권한이 필요한데 NETWORK SERVICE에는 그 권한이 없음(icacls로 확인:
+# BUILTIN\Users는 읽기 전용)도 확인함. 대신 HOME을 이 서비스 계정도 항상
+# 쓸 수 있는 %TEMP%로 명시적으로 지정한 뒤 --global로 등록한다
+# (actions/checkout이 매 실행마다 HOME을 임시 override하는 것과 같은 패턴).
+$env:HOME = $env:TEMP
+git config --global --add safe.directory "*"
 
 $dirty = git status --porcelain
 if ($dirty) {
