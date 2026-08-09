@@ -5,8 +5,12 @@ services:
     image: maximhq/bifrost:latest
     container_name: bifrost
     ports:
-      # Localhost 바인딩 (보안 조치, Tailscale 라우팅 전제)
-      - "127.0.0.1:8080:8080"
+      # 기본값은 루프백만 허용. Tailscale 등 다른 인터페이스로 노출하려면
+      # .env(커밋되지 않음)에 BIFROST_BIND_IP=<이 기기의 Tailscale IP>를 설정하세요.
+      # Docker 포트 매핑은 "어느 인터페이스에 열지"만 제어하며 특정 원격 IP만
+      # 허용하는 화이트리스트가 아니므로, 접근 기기를 제한하려면 Tailscale ACL이나
+      # OS 방화벽을 별도로 설정해야 합니다.
+      - "${BIFROST_BIND_IP:-127.0.0.1}:8080:8080"
     volumes:
       - ./data:/app/data
     environment:
