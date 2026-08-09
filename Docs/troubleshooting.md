@@ -435,10 +435,22 @@ EXAONE 같은 8B 체급 소형 모델은 이 '숨겨진 강제 출처 표기 지
 * **원인:** `deploy_update.ps1` 파일에 **UTF-8 BOM이 없었음**. self-hosted 러너가 `run:` 스텝을 실행하는 `powershell.exe`는 **Windows PowerShell 5.1**(pwsh 7이 아님)인데, 이 버전은 BOM 없는 `.ps1` 파일을 UTF-8이 아니라 시스템 코드페이지(한국어 Windows라 cp949)로 읽는다. 그 결과 파일 안의 한글(주석, 디스코드 알림 문자열)이 깨지면서 문자열 안에 포함된 백틱/따옴표까지 오염되어, 파서가 문자열/블록의 끝을 못 찾고 실패함.
 * **해결:** 파일 맨 앞에 UTF-8 BOM(`EF BB BF`)을 추가. `[System.Management.Automation.Language.Parser]::ParseFile()`로 실행 없이 문법만 파싱해 로컬에서 먼저 검증한 뒤 push. 저장소 내 다른 `.ps1` 파일이 있는지도 함께 확인(없음 — 현재는 `deploy_update.ps1`이 유일).
 
+### 🔴 증상 7: BOM 수정 후에도 `deploy`가 여전히 "unsafe repository"로 실패
+* **증상:** `fatal: unsafe repository ('C:/local_LLM' is owned by someone else)`가 `git status`/`git rev-parse`/`git tag`/`git fetch`마다 반복 출력됨. 증상 5에서 추가했던 `git config --global --add safe.directory $RepoPath`가 실행은 됐지만 **효과가 없었음**.
+* **원인:** 러너 서비스 계정(`NETWORK SERVICE`)에 정상적인 `HOME`이 없어서, `git config --global`이 전역 설정 파일을 어디에 써야 할지 못 찾고 조용히 무효화된 것으로 추정됨(에러 없이 그냥 반영이 안 됨). `git config --system`으로 바꾸는 것도 검토했으나, `icacls`로 확인한 결과 `C:\Program Files\Git\etc`가 `BUILTIN\Users`에 읽기 전용이라 애초에 쓰기 권한이 없음을 확인.
+* **해결:** 스크립트 시작 시 `$env:HOME`을 이 서비스 계정도 항상 쓰기 가능한 `$env:TEMP`로 명시적으로 재지정한 뒤 `git config --global --add safe.directory "*"` 실행. `actions/checkout`이 매 실행마다 `HOME`을 임시 override하는 것과 동일한 패턴. 격리된 테스트(임시 HOME 디렉토리로 실제 실행)로 `.gitconfig`에 정상 반영되는 것까지 확인 후 push.
+
+### 🔴 증상 8: Discord 실패 알림이 깨진 텍스트로 도착
+* **증상:** `?? ?? ??: origin/main fetch? ?????? (???? ??? ? ??).` 처럼 완전히 깨진 메시지가 Discord에 옴.
+* **원인:** BOM 수정은 `.ps1` **파일을 읽는** 문제만 해결했을 뿐, `Invoke-RestMethod -Body $koreanString`가 HTTP 요청 본문을 **보낼 때** 인코딩하는 것은 별개 문제. Windows PowerShell 5.1은 문자열 `-Body`를 시스템 코드페이지(cp949)로 인코딩해서 전송해 한글이 깨짐.
+* **해결:** `[System.Text.Encoding]::UTF8.GetBytes($body)`로 명시적으로 UTF-8 바이트로 변환한 뒤 그 바이트 배열을 `-Body`로 전달.
+
 ### 🟢 교훈
 * GitHub Secrets는 값을 조회할 수 없으므로, 연동 실패 시 **같은 요청을 로컬에서 직접 재현**(`curl -X POST http://127.0.0.1:8080/...`)해서 코드/설정 중 어느 쪽 문제인지 빠르게 좁히는 것이 효율적이었음.
 * 외부 API 모델명은 공급사가 예고 없이 단종시킬 수 있으므로, 코드에 하드코딩된 기본값도 정기적으로 점검이 필요함.
 * self-hosted runner + `pull_request` 조합에서 `GITHUB_TOKEN` 쓰기 권한은 리포지토리 설정으로 못 푸는 플랫폼 차원의 제약일 수 있음 — 안 되면 권한을 더 파는 대신 **애초에 그 권한이 필요 없는 방식(Job Summary 등)으로 설계를 바꾸는 것**이 더 빠른 해결책이었음.
 * 매번 실행 후 에러를 하나씩 고치는 대신, **관련 파일 전체를 처음부터 끝까지 정독하며 잠재적 문제를 한 번에 찾아 고치는 방식**으로 전환한 뒤 증상 5(safe.directory)를 실제 실패가 나기 전에 미리 발견함.
 * 한글이 포함된 `.ps1` 파일은 **반드시 UTF-8 BOM으로 저장**해야 Windows PowerShell 5.1에서 안전하게 파싱됨 — 텍스트 에디터/도구가 기본적으로 BOM 없는 UTF-8을 쓰는 경우가 많아 놓치기 쉬운 함정.
+* 서비스 계정(NETWORK SERVICE 등)에서 도는 자동화 스크립트는 **`HOME`이 정상적으로 설정되어 있다고 가정하면 안 됨** — `git config --global`처럼 HOME에 의존하는 명령은 실행 성공(exit code 0)해도 실제로는 조용히 무효화될 수 있으므로, 실제로 반영됐는지 격리 테스트로 검증하는 습관이 필요함.
+* "파일을 올바르게 읽는 것"과 "출력을 올바르게 내보내는 것"은 인코딩 관점에서 별개의 문제 — 하나를 고쳤다고 관련된 다른 인코딩 문제까지 자동으로 해결되는 것은 아님.
 
