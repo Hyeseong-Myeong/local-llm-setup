@@ -44,7 +44,7 @@ Bifrost 게이트웨이를 통해 클라우드 API로 폴백합니다.
 | 코딩 | `qwen2.5-coder:7b` | Ollama (로컬) |
 | 비전 | `gemma4:e4b` | Ollama (로컬) |
 | 임베딩 | `bge-m3` | Ollama (로컬) |
-| RAG 폴백 | `exaone4.0:1.2b` | Ollama (로컬) |
+| RAG 폴백 | `exaone3.5:7.8b` | Ollama (로컬) |
 | 면접/추론 | `deepseek-r1:14b` | Ollama (로컬) |
 | 클라우드 폴백 | Gemini 1.5 Pro/Flash, Claude 3.5 Sonnet, Llama3 (Groq/Cerebras), Codestral (Mistral) | 각 API |
 
