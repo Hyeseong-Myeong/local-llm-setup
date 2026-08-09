@@ -16,6 +16,7 @@ __pycache__/
 .vscode/
 .idea/
 .antigravityignore
+.claude/
 
 # Data & DB (Keep out of source control)
 data/
