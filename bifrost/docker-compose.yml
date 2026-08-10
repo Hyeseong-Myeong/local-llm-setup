@@ -5,11 +5,15 @@ services:
     image: maximhq/bifrost:latest
     container_name: bifrost
     ports:
-      # 기본값은 루프백만 허용. Tailscale 등 다른 인터페이스로 노출하려면
-      # .env(커밋되지 않음)에 BIFROST_BIND_IP=<이 기기의 Tailscale IP>를 설정하세요.
+      # 루프백(로컬 스크립트/CI용)은 항상 고정으로 열어둔다.
+      - "127.0.0.1:8080:8080"
+      # Tailscale 등 다른 인터페이스는 .env(커밋되지 않음)의 BIFROST_BIND_IP로 추가.
+      # 주의: BIFROST_BIND_IP를 127.0.0.1로 두거나 비워두면 위 줄과 완전히 동일한
+      # 매핑이 중복 등록되어 "port is already allocated" 에러가 난다 — 반드시
+      # 127.0.0.1이 아닌 실제 다른 인터페이스 IP(이 기기의 Tailscale IP 등)로 설정할 것.
       # Docker 포트 매핑은 "어느 인터페이스에 열지"만 제어하며 특정 원격 IP만
       # 허용하는 화이트리스트가 아니므로, 접근 기기를 제한하려면 Tailscale ACL이나
-      # OS 방화벽을 별도로 설정해야 합니다.
+      # OS 방화벽을 별도로 설정해야 한다.
       - "${BIFROST_BIND_IP:-127.0.0.1}:8080:8080"
     volumes:
       - ./data:/app/data
