@@ -584,7 +584,7 @@ alerts를 켜자 즉시 4건이 보고됨. **꺼둔 동안에는 이 중 무엇�
 * **다운그레이드(0.6.x) 폐기 사유:** 취약 범위(`>= 1.0.0`)는 벗어나지만 0.x↔1.x는 API·데이터 포맷이 달라 전체 재임베딩이 필요하고, 구버전 자체의 취약점을 새로 떠안는다.
 * **채택:** 섹션 14에서 Bifrost에 적용한 **"특정 IP 바인딩"** 원칙을 그대로 확장한다. 소켓을 아예 열지 않는 쪽이 방화벽 규칙보다 견고하다는 판단은 그때와 동일하다.
 
-#### 1) Tailscale ACL — 8000 접근을 개발 PC로 한정
+#### 1) Tailscale ACL — 8000 접근을 상시 관리되는 기기로 한정
 > **주의:** 이 저장소는 퍼블릭이므로 아래 IP는 전부 자리표시자다. 실제 값은 `tailscale status`로 확인해 관리 콘솔에서만 채워 넣는다. **패치 없는 무인증 RCE의 설명과 실제 주소를 같은 문서에 두면 공격 좌표를 공개하는 것과 같다.**
 
 ```json
@@ -598,8 +598,9 @@ alerts를 켜자 즉시 4건이 보고됨. **꺼둔 동안에는 이 중 무엇�
   },
 
   "acls": [
-    // 1) ChromaDB(8000)는 개발 PC에서만 — CVE-2026-45829 완화
-    { "action": "accept", "src": ["desktop"], "dst": ["nas:8000"] },
+    // 1) ChromaDB(8000)는 상시 관리되는 기기에서만 — CVE-2026-45829 완화.
+    //    android는 장기 offline이라 패치 상태를 확인할 수 없어 제외한다.
+    { "action": "accept", "src": ["desktop", "macbook", "iphone"], "dst": ["nas:8000"] },
 
     // 2) NAS의 나머지 포트는 기존대로 전 기기 허용 (8000만 빠짐)
     { "action": "accept", "src": ["*"], "dst": ["nas:1-7999", "nas:8001-65535"] },
@@ -610,9 +611,10 @@ alerts를 켜자 즉시 4건이 보고됨. **꺼둔 동안에는 이 중 무엇�
 
   "tests": [
     { "src": "desktop", "accept": ["nas:8000"] },
-    { "src": "macbook", "deny":   ["nas:8000"] },
-    { "src": "iphone",  "deny":   ["nas:8000"] },
-    { "src": "macbook", "accept": ["nas:9100"] }
+    { "src": "macbook", "accept": ["nas:8000"] },
+    { "src": "iphone",  "accept": ["nas:8000"] },
+    { "src": "android", "deny":   ["nas:8000"] },
+    { "src": "android", "accept": ["nas:9100"] }
   ]
 }
 ```
