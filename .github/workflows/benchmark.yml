@@ -1,0 +1,42 @@
+name: Benchmark
+
+# Bifrost 게이트웨이 성능 벤치마크. 원래 pipeline.yml의 performance job이었으나
+# 별도 워크플로로 분리했다.
+#
+# 분리 이유: 이 job의 트리거인 `labeled`를 pipeline.yml에 두면, PR에 라벨이 붙는
+# 순간 labeled 이벤트로 pipeline.yml이 다시 돌고 secret-scan/lint가 `if` 조건에
+# 걸려 skip되면서, 그 skip 결과가 required status check의 최신 상태를 덮어써
+# PR이 영구히 머지 불가 상태가 된다. Dependabot이 dependencies 라벨을 붙이는
+# PR(#17~#22)에서 실제로 발생했다.
+#
+# 이 파일에는 required status check로 지정된 job이 없으므로 `labeled` 트리거를
+# 두어도 머지에 영향을 주지 않는다.
+#
+# self-hosted runner가 필요하다. 등록된 러너가 없으면 대기만 하고 실행되지 않는다.
+# 필요한 리포지토리 시크릿: BIFROST_BASE_URL, BIFROST_API_KEY
+
+on:
+  pull_request:
+    branches: [main]
+    types: [labeled]
+  workflow_dispatch: {}
+  schedule:
+    - cron: "0 4 * * 1" # 성능 벤치마크 주간 실행 (매주 월요일 04:00 UTC)
+
+jobs:
+  performance:
+    # PR에서는 perf 라벨이 붙은 경우에만 실행한다. 수동 실행(workflow_dispatch)과
+    # 주간 스케줄은 조건 없이 실행한다.
+    if: github.event_name != 'pull_request' || github.event.label.name == 'perf'
+    runs-on: self-hosted
+    steps:
+      # 벤치마크는 PR의 코드가 아니라 지금 실제로 떠 있는 Bifrost 게이트웨이의
+      # 응답 속도를 재는 것이라 PR diff와 무관하다. checkout 없이 C:\local_LLM에
+      # 있는(항상 최신 main인) 스크립트를 그대로 실행한다.
+      - name: Run benchmark
+        shell: powershell -ExecutionPolicy Bypass -File "{0}"
+        env:
+          BIFROST_BASE_URL: ${{ secrets.BIFROST_BASE_URL }}
+          BIFROST_API_KEY: ${{ secrets.BIFROST_API_KEY }}
+        run: |
+          & "C:\local_LLM\venv\Scripts\python.exe" "C:\local_LLM\scripts\benchmark_bifrost.py"

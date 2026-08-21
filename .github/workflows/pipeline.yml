@@ -3,7 +3,13 @@ name: Pipeline
 # CI를 하나의 파이프라인으로 통합한 워크플로.
 # - secret-scan / lint / codeql: 서로 의존성 없음 → 병렬 실행
 # - impact-analysis: 위 3개가 모두 통과해야 실행 (self-hosted runner 필요)
-# - performance: 위 체인과 무관 (perf 라벨/수동 실행/주간 스케줄로만 독립 실행)
+#
+# 성능 벤치마크(perf 라벨 / 수동 실행 / 주간 스케줄)는 benchmark.yml로 분리되어 있다.
+# 여기에 `labeled` 트리거를 다시 넣으면 안 된다: 라벨이 붙는 순간 labeled 이벤트로
+# 이 워크플로가 다시 돌고, 아래 job들이 `if` 조건에 걸려 skip되면서 그 skip 결과가
+# required status check(secret-scan/lint/codeql)의 최신 상태를 덮어써 PR이 영구히
+# 머지 불가 상태가 된다. Dependabot이 dependencies 라벨을 붙이는 PR에서 실제로
+# 발생했다 (PR #17~#22).
 #
 # 자동 배포(deploy) job은 의도적으로 없습니다. 개발 디렉토리와 실행 중인
 # 서비스 디렉토리가 동일(C:\local_LLM)해서 별도 "배포 대상"이 존재하지
@@ -19,19 +25,15 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
-    types: [opened, synchronize, reopened, labeled]
-  workflow_dispatch: {}
+    types: [opened, synchronize, reopened]
   schedule:
     - cron: "0 3 * * 1" # CodeQL 주간 스캔 (매주 월요일 03:00 UTC)
-    - cron: "0 4 * * 1" # 성능 벤치마크 주간 실행 (매주 월요일 04:00 UTC)
 
 jobs:
   # ---- 병렬 실행: 서로 의존성 없음 ----
 
   secret-scan:
-    if: >
-      github.event_name == 'push' ||
-      (github.event_name == 'pull_request' && github.event.action != 'labeled')
+    if: github.event_name == 'push' || github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -45,9 +47,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   lint:
-    if: >
-      github.event_name == 'push' ||
-      (github.event_name == 'pull_request' && github.event.action != 'labeled')
+    if: github.event_name == 'push' || github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -65,8 +65,8 @@ jobs:
   codeql:
     if: >
       github.event_name == 'push' ||
-      (github.event_name == 'pull_request' && github.event.action != 'labeled') ||
-      (github.event_name == 'schedule' && github.event.schedule == '0 3 * * 1')
+      github.event_name == 'pull_request' ||
+      github.event_name == 'schedule'
     runs-on: ubuntu-latest
     permissions:
       security-events: write
@@ -92,7 +92,7 @@ jobs:
   # ---- secret-scan/lint/codeql 통과 후에만 실행 ----
 
   impact-analysis:
-    if: github.event_name == 'pull_request' && github.event.action != 'labeled'
+    if: github.event_name == 'pull_request'
     needs: [secret-scan, lint, codeql]
     runs-on: self-hosted
     defaults:
@@ -116,23 +116,3 @@ jobs:
           BIFROST_API_KEY: ${{ secrets.BIFROST_API_KEY }}
         run: |
           & "C:\local_LLM\venv\Scripts\python.exe" scripts\impact_analysis.py
-
-  # ---- 독립 실행: perf 라벨 / 수동 실행 / 주간 스케줄 ----
-
-  performance:
-    if: >
-      (github.event_name == 'pull_request' && github.event.action == 'labeled' && github.event.label.name == 'perf') ||
-      github.event_name == 'workflow_dispatch' ||
-      (github.event_name == 'schedule' && github.event.schedule == '0 4 * * 1')
-    runs-on: self-hosted
-    steps:
-      # 벤치마크는 PR의 코드가 아니라 지금 실제로 떠 있는 Bifrost 게이트웨이의
-      # 응답 속도를 재는 것이라 PR diff와 무관하다. checkout 없이 C:\local_LLM에
-      # 있는(항상 최신 main인) 스크립트를 그대로 실행한다.
-      - name: Run benchmark
-        shell: powershell -ExecutionPolicy Bypass -File "{0}"
-        env:
-          BIFROST_BASE_URL: ${{ secrets.BIFROST_BASE_URL }}
-          BIFROST_API_KEY: ${{ secrets.BIFROST_API_KEY }}
-        run: |
-          & "C:\local_LLM\venv\Scripts\python.exe" "C:\local_LLM\scripts\benchmark_bifrost.py"
