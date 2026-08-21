@@ -19,7 +19,6 @@ import threading
 import traceback
 from typing import TypedDict
 
-import chromadb
 import requests
 from chromadb.utils.embedding_functions import OllamaEmbeddingFunction
 from dotenv import load_dotenv
@@ -35,6 +34,7 @@ from watchdog.events import FileSystemEventHandler
 from watchdog.observers import Observer
 
 import prompts  # 새로 생성한 프롬프트 파일을 가져옵니다.
+from chroma_client import get_chroma_client
 from config import settings
 
 load_dotenv()
@@ -156,7 +156,7 @@ def safe_move(src: str, dst_dir: str, file_name: str):
 
 # ChromaDB 원격 연결 (실패 시 웹훅 알림 후 종료)
 try:
-    chroma_client = chromadb.HttpClient(host=settings.CHROMA_HOST, port=settings.CHROMA_PORT)
+    chroma_client = get_chroma_client()
     print("⏳ Ollama (bge-m3) 임베딩 모델 연결 중...")
 
     ollama_ef = OllamaEmbeddingFunction(

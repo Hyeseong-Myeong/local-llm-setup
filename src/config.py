@@ -7,6 +7,7 @@ class Settings(BaseSettings):
     # 주요 환경 변수 설정 (.env 파일에서 주입받음)
     CHROMA_HOST: str
     CHROMA_PORT: int
+    CHROMA_TOKEN: str = ""  # 비우면 무인증. 앞단 프록시 도입 후 값이 채워진다
     MODEL_NAME: str
     VAULT_PATH: str
     DISCORD_WEBHOOK_URL: str = ""

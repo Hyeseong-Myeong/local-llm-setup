@@ -4,15 +4,15 @@ import sys
 # 상위 디렉토리(src)를 모듈 검색 경로에 추가
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-import chromadb
 from chromadb.utils import embedding_functions
 
-# 1. 시놀로지 NAS ChromaDB 연결
-CHROMA_HOST = "192.168.x.x"  # TODO: 실제 NAS IP로 변경하세요 (또는 config.py의 settings.CHROMA_HOST 사용)
-CHROMA_PORT = 8000
-chroma_client = chromadb.HttpClient(host=CHROMA_HOST, port=CHROMA_PORT)
+from chroma_client import get_chroma_client
+from config import settings
 
-print(f"✅ ChromaDB 연결 완료: {CHROMA_HOST}:{CHROMA_PORT}")
+# 1. 시놀로지 NAS ChromaDB 연결 (접속 정보는 .env -> config.settings 에서 온다)
+chroma_client = get_chroma_client()
+
+print(f"✅ ChromaDB 연결 완료: {settings.CHROMA_HOST}:{settings.CHROMA_PORT}")
 
 # ==========================================
 # [수동 삭제 영역]
