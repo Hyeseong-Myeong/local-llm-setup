@@ -494,4 +494,44 @@ EXAONE 같은 8B 체급 소형 모델은 이 '숨겨진 강제 출처 표기 지
 * Windows에서 "포트를 쓰는 프로세스가 없는데 바인딩이 거부된다"면 점유(`netstat`)가 아니라 **예약 범위(`excludedportrange`)**를 먼저 확인할 것.
 * 예약 블록 위치는 재부팅마다 달라지므로 **"어제는 되던 게 오늘 안 되는" 간헐적 장애**로 나타남. 서비스 포트는 동적 포트 범위 밖(이 기기 기준 15000 초과)에 두는 것이 안전함.
 
+---
+
+## 15. ⚙️ [2026-08-21] CI 파이프라인 — `/v1` 경로 중복과 `labeled` 트리거로 인한 머지 불가
+
+섹션 14의 포트 이전(8080 → 18080) 직후 CI에서 연달아 드러난 두 가지 문제.
+
+### 🔴 증상 1: `impact-analysis`가 `405 Method Not Allowed`로 실패 (증상 13-2의 재발)
+* **경과:** 포트 이전 후 GitHub Secrets의 `BIFROST_BASE_URL`을 갱신하자 에러가 바뀜.
+  * 갱신 전: `HTTPConnectionPool(host='127.0.0.1', port=8080): Max retries exceeded` — 연결 자체 실패
+  * 갱신 후: `405 Client Error: Method Not Allowed for url: .../v1/chat/completions` — 연결은 성공
+* **원인:** 시크릿에 `.env`와 같은 형식(`/v1` 포함)을 넣었는데, `scripts/impact_analysis.py`는 값 뒤에 `/v1/chat/completions`를 직접 붙인다 → `.../v1/v1/chat/completions`.
+* **근본 원인 — 같은 이름의 값이 소비처마다 다른 형식을 요구했음:**
+
+  | 소비처 | 코드 | 요구 형식 |
+  |---|---|---|
+  | `src/agent/wiki_agent.py` | `ChatOpenAI(base_url=...)` | **`/v1` 포함** (LangChain이 `/chat/completions`만 붙임) |
+  | `scripts/impact_analysis.py` | `f"{url}/v1/chat/completions"` | **`/v1` 제외** |
+  | `scripts/benchmark_bifrost.py` | `f"{url}/v1/chat/completions"` | **`/v1` 제외** |
+
+  증상 13-2에서 이미 한 번 겪었고, 포트를 바꾸면서 같은 함정을 다시 밟았다.
+* **해결:** 값 쪽을 통일하는 대신 **코드가 양쪽 형식을 흡수**하도록 변경 — `os.environ["BIFROST_BASE_URL"].rstrip("/").removesuffix("/v1")`. 어느 형식이 들어와도 정규화되므로 시크릿을 다시 손댈 필요가 없고, 다음에 또 헷갈려도 깨지지 않는다.
+* **검증(키 없이):** 인증 없이 POST를 던져 경로만 확인 — `/v1/chat/completions` → **400**(빈 body에 대한 정상 응답, 경로 유효), `/v1/v1/chat/completions` → **405**(CI 에러 재현). 증상 13-2의 "로컬에서 POST 시 400이 정상"과 일치.
+
+### 🔴 증상 2: Dependabot PR 6건이 required check 미충족으로 영구 머지 불가
+* **증상:** PR #17~#22가 모두 `mergeStateStatus: BLOCKED`. required check인 `secret-scan`/`lint`가 `skipping` 상태로 기록되어 있었음(`codeql (python)`은 pass).
+* **원인:** `pipeline.yml`의 트리거에 `labeled`가 있고(`types: [opened, synchronize, reopened, labeled]`), 각 job은 `github.event.action != 'labeled'` 조건으로 스킵된다. **Dependabot이 `dependencies` 라벨을 붙이는 순간 labeled 이벤트로 워크플로가 다시 돌고, 그 실행에서 job들이 스킵되면서 skip 결과가 required check의 최신 상태를 덮어쓴다.** 라벨이 붙는 모든 PR이 같은 방식으로 막힌다.
+* **해결:** `performance` job을 `.github/workflows/benchmark.yml`로 분리하고 `pipeline.yml`에서 `labeled` 트리거 제거. required check가 없는 워크플로에만 라벨 트리거를 둔다.
+* **분리 시 함께 옮겨야 했던 것 (빠뜨리면 빈 실행이 생김):**
+  * `workflow_dispatch` — pipeline.yml에서 이 트리거로 실행되던 job은 `performance` 하나뿐이었다.
+  * `schedule: "0 4 * * 1"` — 벤치마크 주간 실행 전용. `"0 3 * * 1"`(CodeQL 주간 스캔)은 pipeline.yml에 남긴다.
+* **영향 없던 것:** Ruleset의 required check 설정(job 이름이 그대로 pipeline.yml에 남음), `impact-analysis`의 `needs`, self-hosted runner 사용 방식.
+* **기존 PR은 자동 복구되지 않음:** `pull_request` 워크플로는 PR 브랜치 기준으로 정의를 읽으므로, 수정이 main에 머지돼도 이미 열린 PR은 옛 정의를 계속 쓴다. `@dependabot rebase` 또는 close→reopen이 필요하다.
+* **이번 처리:** 6건 모두 **보안 업데이트가 아님을 확인**하고 close. 근거는 ① 리포지토리의 Dependabot alerts가 비활성 상태였음(`HTTP 403: Dependabot alerts are disabled`)이라 취약점 탐지로 생성된 PR일 수 없음, ② 라벨에 `security` 없음, ③ 본문에 실질적 취약점 언급 없음(매칭된 것은 compatibility score 배지 URL). Dependabot은 닫힌 PR을 같은 버전으로 재생성하지 않되 더 새 버전이 나오면 새로 열므로 업데이트를 영구히 놓치지 않는다. 이후 Dependabot alerts는 활성화함.
+
+### 🟢 교훈
+* **required status check로 지정한 job에 스킵될 여지를 남기면 안 된다.** GitHub은 스킵을 "미충족"으로 취급하므로, 조건부로 스킵되는 job은 required에서 빼거나 항상 실행되게 해야 한다. 라벨·수동 실행처럼 선택적 트리거는 **required check가 없는 별도 워크플로**로 격리하는 것이 안전하다.
+* **같은 이름의 설정값이 소비처마다 다른 형식을 요구하면 반드시 재발한다.** 값을 통일하기 어려우면 코드가 양쪽을 흡수하게 만드는 편이 실효적이다.
+* **포트/URL을 바꿀 때는 소비처를 빠짐없이 세어야 한다.** 이번 이전에서 실제로 갱신이 필요했던 곳: `.env`, GitHub Secrets, `README.md`, `bifrost/docker-compose.yml`, 그리고 **Open WebUI의 연결 설정**(환경변수가 아니라 `webui.db`에 저장되어 있어 `docker inspect`로는 보이지 않음). 코드·문서 검색만으로는 마지막 항목을 찾을 수 없다.
+* 자격 증명 없이도 **경로 유효성은 검증할 수 있다.** 인증 없는 POST에 400이 오면 경로는 정상, 404/405면 경로가 틀린 것이다. 키를 꺼내지 않고 URL 문제를 가려낼 수 있다.
+
 
