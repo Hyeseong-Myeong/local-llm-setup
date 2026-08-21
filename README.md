@@ -14,7 +14,7 @@ Bifrost 게이트웨이를 통해 클라우드 API로 폴백합니다.
         │                                 │
         └── Discord Bot (discord_bot.py)  │
                     │                     ▼
-                    ▼              Bifrost Gateway (Docker, :8080)
+                    ▼              Bifrost Gateway (Docker, :18080)
             RAW_DIR (스크래핑 원문)        │
                     │           ┌─────────┼─────────┬──────────┐
                     ▼           ▼         ▼          ▼          ▼

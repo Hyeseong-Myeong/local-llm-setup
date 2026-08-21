@@ -461,3 +461,37 @@ EXAONE 같은 8B 체급 소형 모델은 이 '숨겨진 강제 출처 표기 지
 ### 🟢 [2026-08-10] 결정: `deploy` job 완전 제거
 증상 5~9를 거치며 `deploy`에서만 반복적으로 문제가 발생했음(safe.directory, HOME, 인코딩, 그리고 증상 9의 오탐까지). 근본적으로 재검토한 결과, 이 프로젝트는 **개발 디렉토리와 서비스가 실행되는 디렉토리가 애초에 동일(`C:\local_LLM`)**해서 "배포 대상"이라는 개념 자체가 실제로는 존재하지 않고, GitHub push는 버전 관리/아카이브 목적이 큼. `deploy` job과 `scripts/deploy_update.ps1`을 제거하고, `main`이 바뀌면 수동으로 `git pull` + `restart.bat`을 실행하는 방식으로 되돌림. `secret-scan`/`lint`/`codeql`/`impact-analysis`는 이 문제와 무관하게 안정적으로 동작했음.
 
+---
+
+## 14. 🌐 [2026-08-21] Bifrost 로컬/원격 동시 접속 불가 — Windows 예약 포트(Hyper-V) 문제
+
+### 🔴 증상: 컨테이너는 `healthy`인데 로컬(`127.0.0.1:8080`)·원격(Tailscale) 양쪽 모두 연결 실패
+* **관찰:** `docker ps`는 `Up (healthy)`, 컨테이너 로그도 `successfully started bifrost, serving UI on http://0.0.0.0:8080`으로 완전히 정상. 그런데 양쪽 주소 모두 연결 거부.
+* **결정적 단서 — 요청한 바인딩과 실제 바인딩의 불일치:**
+  * `HostConfig.PortBindings` = `127.0.0.1:8080` + `<Tailscale IP>:8080` (설정은 정상)
+  * `NetworkSettings.Ports` = `{"8080/tcp":[]}` ← **실제로는 하나도 붙지 않음**
+  * `docker port bifrost`는 출력 없음, `netstat`에도 8080 없음.
+  * `docker ps`의 PORTS에 찍힌 `127.0.0.1:32768->8080/tcp`는 실제와 무관한 잔여 표시값이었음.
+* **오진했던 가설:** 직전 커밋(루프백+Tailscale IP 이중 바인딩)을 의심해, 부팅 시 Tailscale 인터페이스가 늦게 올라와 특정 IP 바인딩이 실패하는 경쟁 조건으로 추정했음. 같은 시각 재시작된 open-webui가 정상인 것도 "인터페이스를 지정하지 않아서"로 해석했으나 **둘 다 틀렸음**.
+* **실제 원인:** 컨테이너를 재생성하자 비로소 에러 원문이 드러남 — `bind: An attempt was made to access a socket in a way forbidden by its access permissions`(WSAEACCES). **`127.0.0.1:8080`조차 실패**했으므로 Tailscale과 무관.
+  * `netsh interface ipv4 show excludedportrange protocol=tcp` → **`8037-8136` 구간이 예약되어 8080이 그 안에 포함**. Hyper-V/WinNAT가 선점한 것으로, 예약된 포트는 어떤 프로세스도 바인딩할 수 없음(점유 프로세스는 없고 예약만 걸린 상태).
+  * `netsh int ipv4 show dynamicport tcp` → **동적 포트 범위가 `1024~15000`** (Windows 기본값은 49152~). 이 비정상 설정 탓에 Hyper-V가 부팅할 때마다 해당 범위 안에서 임의 블록을 예약해 가고, 8080이 그 사정권에 들어 있었음.
+  * open-webui가 멀쩡했던 이유는 인터페이스 지정 여부가 아니라 **3000번이 예약 범위 밖**이었기 때문.
+* **해결:** 호스트 포트를 **18080**으로 이전(컨테이너 내부 포트는 Bifrost가 서빙하는 8080 그대로 유지). 18080은 동적 포트 범위와 예약 블록 밖이라 재부팅해도 선점되지 않음. `.env`의 `BIFROST_BASE_URL`, GitHub Secrets의 동명 시크릿, README 아키텍처 다이어그램도 함께 갱신.
+* **대안(미채택):** `netsh int ipv4 set dynamicport tcp start=49152 num=16384`로 동적 포트 범위를 기본값으로 되돌리고 8080을 영구 예약(`add excludedportrange ... store=persistent`)하는 방법. 관리자 권한과 재부팅이 필요해 이번에는 포트 이전을 택했으나, **비정상 동적 포트 범위 자체는 8080 외 다른 서비스 포트도 언제든 삼킬 수 있어 근본 원인으로 남아 있음.**
+
+### 🟢 [2026-08-21] 결정: `0.0.0.0` 바인딩 + 방화벽 제한 안으로 바꾸지 않음
+* **검토 배경:** 특정 IP 바인딩이 인터페이스 상태에 의존한다고 판단해, `0.0.0.0:18080`으로 단순화하고 접근 제한은 Windows 방화벽에 맡기는 안을 검토했음.
+* **폐기 사유 1:** 애초에 인터페이스 타이밍은 원인이 아니었으므로(위 참조) 이 안의 이점이 사라짐.
+* **폐기 사유 2:** 방화벽 규칙을 조회해보니 `Docker Desktop Backend` 규칙이 Private/Public 프로필에서 **TCP/UDP 전 포트(`LocalPort: Any`) 인바운드를 허용**하고 있었음. 즉 `0.0.0.0` 바인딩은 Wi-Fi 대역에 그대로 노출되며, Windows 기본 차단에 기댈 수 없음.
+* **폐기 사유 3:** Windows 방화벽은 **Block 규칙이 Allow보다 우선**하고 "~를 제외하고 차단"이라는 문법이 없음. "Tailscale만 허용"을 표현하려면 RFC1918 사설 대역을 일일이 Block으로 나열해야 해서 규칙이 늘고 깨지기 쉬움.
+* **결론:** 현행 이중 바인딩(`127.0.0.1` + `${BIFROST_BIND_IP}`) 유지. 특정 IP 바인딩은 **Wi-Fi 인터페이스에 소켓 자체를 열지 않으므로** 방화벽 설정과 무관하게 안전함. 기존 `Tailscale-In` 규칙(`LocalIP: <Tailscale IP>/32`, `Protocol: Any`)이 포트 무관 허용이라 18080도 추가 방화벽 작업 없이 커버됨(원격 200 OK로 확인).
+
+### 🟢 교훈
+* **Docker 헬스체크는 컨테이너 내부에서 실행되므로 호스트 포트 퍼블리싱 실패를 원리적으로 감지하지 못함.** `healthy`인데 접속 불가가 실제로 성립함. 감시는 ①컨테이너 실행 여부 ②`NetworkSettings.Ports`가 비어있지 않은지 ③호스트에서의 HTTP 응답, **3계층으로 나눠야** 하며 ②를 따로 보면 이 장애 유형을 즉시 특정할 수 있음.
+* `docker ps`의 PORTS 컬럼을 신뢰하지 말 것. 실제 적용 여부는 `docker inspect`의 `NetworkSettings.Ports`와 `netstat`로 교차 확인해야 함.
+* **`restart: unless-stopped`로 자동 재시작된 컨테이너는 바인딩 실패 에러를 삼킨다.** 컨테이너를 재생성(`docker rm -f` → `up -d`)해야 에러 원문이 드러남 — 이번 진단의 전환점이었음. 상태만 보고 원인을 추정하기 전에 **재현부터** 시킬 것.
+* Windows에서 "포트를 쓰는 프로세스가 없는데 바인딩이 거부된다"면 점유(`netstat`)가 아니라 **예약 범위(`excludedportrange`)**를 먼저 확인할 것.
+* 예약 블록 위치는 재부팅마다 달라지므로 **"어제는 되던 게 오늘 안 되는" 간헐적 장애**로 나타남. 서비스 포트는 동적 포트 범위 밖(이 기기 기준 15000 초과)에 두는 것이 안전함.
+
+
