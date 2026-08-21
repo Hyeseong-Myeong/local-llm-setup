@@ -5,8 +5,18 @@ services:
     image: maximhq/bifrost:latest
     container_name: bifrost
     ports:
+      # 호스트 포트는 18080을 쓴다. 8080을 피하는 이유:
+      # 이 기기의 Windows TCP 동적 포트 범위가 1024~15000으로 설정되어 있어
+      # (netsh int ipv4 show dynamicport tcp), Hyper-V/WinNAT가 부팅할 때마다
+      # 그 범위 안에서 임의의 블록을 예약해 간다
+      # (netsh interface ipv4 show excludedportrange protocol=tcp).
+      # 8080이 예약 블록(예: 8037-8136)에 걸리면 바인딩이 거부되면서
+      # "socket in a way forbidden by its access permissions" 에러가 나고,
+      # 컨테이너는 healthy인데 포트 매핑만 조용히 사라져 로컬/원격 모두 끊긴다.
+      # 18080은 동적 포트 범위 밖이라 예약 대상이 되지 않는다.
+      # 컨테이너 내부 포트(8080)는 Bifrost가 서빙하는 포트이므로 그대로 둔다.
       # 루프백(로컬 스크립트/CI용)은 항상 고정으로 열어둔다.
-      - "127.0.0.1:8080:8080"
+      - "127.0.0.1:18080:8080"
       # Tailscale 등 다른 인터페이스는 .env(커밋되지 않음)의 BIFROST_BIND_IP로 추가.
       # 주의: BIFROST_BIND_IP를 127.0.0.1로 두거나 비워두면 위 줄과 완전히 동일한
       # 매핑이 중복 등록되어 "port is already allocated" 에러가 난다 — 반드시
@@ -14,7 +24,7 @@ services:
       # Docker 포트 매핑은 "어느 인터페이스에 열지"만 제어하며 특정 원격 IP만
       # 허용하는 화이트리스트가 아니므로, 접근 기기를 제한하려면 Tailscale ACL이나
       # OS 방화벽을 별도로 설정해야 한다.
-      - "${BIFROST_BIND_IP:-127.0.0.1}:8080:8080"
+      - "${BIFROST_BIND_IP:-127.0.0.1}:18080:8080"
     volumes:
       - ./data:/app/data
     environment:
