@@ -25,7 +25,13 @@ def get_diff(base_ref: str) -> str:
 
 
 def analyze(diff: str) -> str:
-    bifrost_url = os.environ["BIFROST_BASE_URL"].rstrip("/")
+    # BIFROST_BASE_URL은 소비하는 쪽마다 기대하는 형식이 다르다. LangChain의
+    # ChatOpenAI(src/agent/wiki_agent.py)는 "/v1"까지 포함한 값을 받고, 이 스크립트는
+    # 아래에서 "/v1/chat/completions"를 직접 붙인다. 그래서 같은 이름의 값이 .env와
+    # GitHub Secrets에서 서로 다른 형식이 되어 두 번이나 405를 냈다
+    # (".../v1" + "/v1/chat/completions" = ".../v1/v1/chat/completions").
+    # 어느 형식이 들어와도 동작하도록 끝의 "/v1"을 떼어 정규화한다.
+    bifrost_url = os.environ["BIFROST_BASE_URL"].rstrip("/").removesuffix("/v1")
     bifrost_key = os.environ["BIFROST_API_KEY"]
     # Bifrost 모델명은 provider를 명시해야 자동 라우팅이 모호해지지 않는다
     # (bare "llama3-70b-8192"는 "could not auto resolve a provider" 오류 발생).

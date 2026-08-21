@@ -47,7 +47,9 @@ def benchmark_model(base_url: str, api_key: str, model: str) -> dict:
 
 
 def main() -> None:
-    base_url = os.environ["BIFROST_BASE_URL"].rstrip("/")
+    # 아래 benchmark_model()이 "/v1/chat/completions"를 직접 붙이므로, 값에 이미
+    # "/v1"이 들어있으면 떼어낸다 (impact_analysis.py와 동일한 이유 — 그쪽 주석 참고).
+    base_url = os.environ["BIFROST_BASE_URL"].rstrip("/").removesuffix("/v1")
     api_key = os.environ["BIFROST_API_KEY"]
     ollama_url = os.environ.get("OLLAMA_BASE_URL", "http://127.0.0.1:11434").rstrip("/")
 
