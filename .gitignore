@@ -34,3 +34,6 @@ Desktop.ini
 
 # Local scratch files (never commit — may contain personal network/infra info)
 tmp/
+# hyeseongkit (커밋하지 않음 — D20/F2)
+.hyeseongkit/
+HYESEONGKIT.md
