@@ -5,15 +5,15 @@ import sys
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
-import chromadb
 from chromadb.utils.embedding_functions import OllamaEmbeddingFunction
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
+from chroma_client import get_chroma_client
 from config import settings
 
 # 1. 시놀로지 NAS ChromaDB 연결
 try:
-    chroma_client = chromadb.HttpClient(host=settings.CHROMA_HOST, port=settings.CHROMA_PORT)
+    chroma_client = get_chroma_client()
     print(f"✅ ChromaDB 연결 성공: {settings.CHROMA_HOST}:{settings.CHROMA_PORT}")
 except Exception as e:
     print(f"❌ ChromaDB 연결 실패: {e}")

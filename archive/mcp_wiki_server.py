@@ -1,5 +1,5 @@
+from chroma_client import get_chroma_client
 from config import settings
-import chromadb
 from chromadb.utils.embedding_functions import OllamaEmbeddingFunction
 import os
 import sys
@@ -20,7 +20,7 @@ ollama_ef = OllamaEmbeddingFunction(
 )
 
 try:
-    chroma_client = chromadb.HttpClient(host=settings.CHROMA_HOST, port=settings.CHROMA_PORT)
+    chroma_client = get_chroma_client()
     collection = chroma_client.get_or_create_collection(name="my_wiki_db", embedding_function=ollama_ef)
     print("✅ ChromaDB 위키 지식베이스 연결 성공")
 except Exception as e:
