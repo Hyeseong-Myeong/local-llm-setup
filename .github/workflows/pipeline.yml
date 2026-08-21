@@ -110,6 +110,11 @@ jobs:
 
       - name: Run impact analysis
         env:
+          # 한국어 Windows 러너에서 Python stdout/stderr이 cp949로 인코딩되면
+          # Actions의 UTF-8 로그 캡처와 어긋나 한글이 깨진다. 특히 실패 경로
+          # (impact_analysis.py의 sys.stderr 출력)는 OS/네트워크 예외 메시지가
+          # 한글로 나오므로, 정작 원인을 봐야 할 때 로그가 깨진다.
+          PYTHONIOENCODING: utf-8
           BASE_REF: ${{ github.base_ref }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           BIFROST_BASE_URL: ${{ secrets.BIFROST_BASE_URL }}

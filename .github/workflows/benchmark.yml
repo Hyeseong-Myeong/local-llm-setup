@@ -36,6 +36,10 @@ jobs:
       - name: Run benchmark
         shell: powershell -ExecutionPolicy Bypass -File "{0}"
         env:
+          # 러너가 한국어 Windows라 Python stdout이 기본적으로 cp949로 인코딩되는데
+          # Actions는 로그를 UTF-8로 캡처해서, 한글 표 헤더가 로그에서 깨진다
+          # (Job Summary는 encoding="utf-8"로 직접 쓰므로 원래 정상).
+          PYTHONIOENCODING: utf-8
           BIFROST_BASE_URL: ${{ secrets.BIFROST_BASE_URL }}
           BIFROST_API_KEY: ${{ secrets.BIFROST_API_KEY }}
         run: |
