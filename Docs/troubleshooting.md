@@ -526,7 +526,22 @@ EXAONE 같은 8B 체급 소형 모델은 이 '숨겨진 강제 출처 표기 지
   * `schedule: "0 4 * * 1"` — 벤치마크 주간 실행 전용. `"0 3 * * 1"`(CodeQL 주간 스캔)은 pipeline.yml에 남긴다.
 * **영향 없던 것:** Ruleset의 required check 설정(job 이름이 그대로 pipeline.yml에 남음), `impact-analysis`의 `needs`, self-hosted runner 사용 방식.
 * **기존 PR은 자동 복구되지 않음:** `pull_request` 워크플로는 PR 브랜치 기준으로 정의를 읽으므로, 수정이 main에 머지돼도 이미 열린 PR은 옛 정의를 계속 쓴다. `@dependabot rebase` 또는 close→reopen이 필요하다.
-* **이번 처리:** 6건 모두 **보안 업데이트가 아님을 확인**하고 close. 근거는 ① 리포지토리의 Dependabot alerts가 비활성 상태였음(`HTTP 403: Dependabot alerts are disabled`)이라 취약점 탐지로 생성된 PR일 수 없음, ② 라벨에 `security` 없음, ③ 본문에 실질적 취약점 언급 없음(매칭된 것은 compatibility score 배지 URL). Dependabot은 닫힌 PR을 같은 버전으로 재생성하지 않되 더 새 버전이 나오면 새로 열므로 업데이트를 영구히 놓치지 않는다. 이후 Dependabot alerts는 활성화함.
+* **이번 처리와 그 오판:** 6건을 "보안 업데이트가 아니다"라고 판단해 close했으나 **이 판단은 틀렸다.** 근거로 삼은 것은 ① 리포지토리의 Dependabot alerts가 비활성 상태였고(`HTTP 403: Dependabot alerts are disabled`) ② 라벨에 `security`가 없으며 ③ 본문에 실질적 취약점 언급이 없다(매칭된 것은 compatibility score 배지 URL)는 점이었다. 그러나 **alerts가 꺼져 있다는 것은 "취약점이 없다"가 아니라 "GitHub이 분류할 수 없었다"는 정보 부재**다. 직후 alerts를 활성화하자 취약점 4건이 드러났고, close한 PR #18(aiohttp 3.14.1 → 3.14.3)이 그중 HIGH 1건과 MEDIUM 2건을 해결하는 **실제 보안 패치**였다.
+* **되돌린 조치:** `requirements.txt`의 aiohttp를 3.14.3으로 올리고 venv에도 설치(`pip check` 통과, discord.py 2.7.1 호환 확인). 나머지 4건(uvicorn/langfuse/langgraph/langchain)은 취약점과 무관해 close 상태로 둔다 — Dependabot은 닫힌 PR을 같은 버전으로 재생성하지 않되 더 새 버전이 나오면 새로 열므로 업데이트를 영구히 놓치지는 않는다.
+
+### 🟢 [2026-08-21] Dependabot alerts 활성화로 드러난 취약점
+alerts를 켜자 즉시 4건이 보고됨. **꺼둔 동안에는 이 중 무엇도 알림이 오지 않았다.**
+
+| 심각도 | 패키지 | 설치 버전 | 내용 | 패치 |
+|---|---|---|---|---|
+| HIGH | aiohttp | 3.14.1 | C HTTP 응답 파서 에러 경로의 힙 out-of-bounds read | 3.14.3 ✅ 적용 |
+| MEDIUM | aiohttp | 3.14.1 | WebSocket upgrade를 통한 HTTP request smuggling | 3.14.2 ✅ 적용 |
+| MEDIUM | aiohttp | 3.14.1 | permessage-deflate 미협상 압축 프레임 수용 | 3.14.2 ✅ 적용 |
+| **CRITICAL** | chromadb | 1.5.9 | **pre-auth 원격 코드 실행** (CVE-2026-45829 / GHSA-f4j7-r4q5-qw2c) | **없음** ⚠️ |
+
+* **chromadb CVE-2026-45829는 업그레이드로 해결할 수 없다.** 취약 범위가 `>= 1.0.0, <= 1.5.9`인데 PyPI 최신 버전이 1.5.9로, 최신 버전 자체가 취약 범위 안에 있다. 2026-05-18 공개 이후 패치 릴리스가 없다.
+* 공격 경로: `/api/v2/tenants/{tenant}/databases/{db}/collections`에 악성 model repository와 `trust_remote_code=true`를 보내면 **인증 없이** 서버에서 임의 코드가 실행된다.
+* 이 프로젝트는 임베디드가 아니라 **서버 모드**로 쓴다(`chromadb.HttpClient(...)` — `wiki_agent.py:159`, `fastapi_wiki_server.py:36`, `reembed_chroma.py:16`, `recreate_db.py:13`). 서버는 시놀로지 NAS의 Docker 컨테이너이고 Tailscale IP로 접근한다. 공개 인터넷 노출은 아니지만 **tailnet 내 기기 하나가 침해되면 NAS에서 코드 실행이 가능**하므로 네트워크 격리 수준을 점검해야 한다.
 
 ### 🟢 교훈
 * **required status check로 지정한 job에 스킵될 여지를 남기면 안 된다.** GitHub은 스킵을 "미충족"으로 취급하므로, 조건부로 스킵되는 job은 required에서 빼거나 항상 실행되게 해야 한다. 라벨·수동 실행처럼 선택적 트리거는 **required check가 없는 별도 워크플로**로 격리하는 것이 안전하다.
