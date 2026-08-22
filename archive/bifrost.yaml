@@ -1,3 +1,14 @@
+# [보관] 이 파일은 더 이상 사용되지 않는다 — 2026-08-22 archive/ 로 이동.
+#
+# Bifrost v1.6+ 는 YAML 설정 파일을 읽지 않고 내부 SQLite(config.db)로만 구동된다.
+# 실제 배포도 docker-compose 에서 ./data:/app/data 만 마운트하며 이 파일은
+# 컨테이너에 전달되지 않는다. 즉 여기 적힌 providers/models 는 실행에 아무
+# 영향이 없다. 실제 설정은 bifrost/data/config.db 이며 Web UI 로 관리한다.
+#
+# 설계 근거: Docs/LLM_system_extend_loadmap.md 의 2026-07-15 설계 변경 기록.
+# 남겨 두는 이유: 초기 라우팅 의도(어느 모델을 어느 프로바이더에 매핑했는지)의
+# 기록으로서 가치가 있다. 근거 자료로 인용하지 말 것 — 현행 설정이 아니다.
+
 providers:
   ollama:
     type: ollama
