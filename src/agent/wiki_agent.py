@@ -20,7 +20,6 @@ import traceback
 from typing import TypedDict
 
 import requests
-from chromadb.utils.embedding_functions import OllamaEmbeddingFunction
 from dotenv import load_dotenv
 from langchain_core.messages import HumanMessage, SystemMessage
 
@@ -35,6 +34,7 @@ from watchdog.observers import Observer
 
 import prompts  # 새로 생성한 프롬프트 파일을 가져옵니다.
 from chroma_client import get_chroma_client
+from embedding_function import get_embedding_function
 from config import settings
 
 load_dotenv()
@@ -157,15 +157,12 @@ def safe_move(src: str, dst_dir: str, file_name: str):
 # ChromaDB 원격 연결 (실패 시 웹훅 알림 후 종료)
 try:
     chroma_client = get_chroma_client()
-    print("⏳ Ollama (bge-m3) 임베딩 모델 연결 중...")
+    print("⏳ 임베딩(bge-m3) 연결 중 — Bifrost 경유...")
 
-    ollama_ef = OllamaEmbeddingFunction(
-        url=f"{settings.OLLAMA_BASE_URL}/api/embeddings",
-        model_name="bge-m3:latest"
-    )
+    embedding_fn = get_embedding_function()
 
-    collection = chroma_client.get_or_create_collection(name="my_wiki_db", embedding_function=ollama_ef)
-    print(f"✅ ChromaDB 연결 및 Ollama 임베딩 설정 완료: {settings.CHROMA_HOST}:{settings.CHROMA_PORT}")
+    collection = chroma_client.get_or_create_collection(name="my_wiki_db", embedding_function=embedding_fn)
+    print(f"✅ ChromaDB 연결 및 임베딩 설정 완료: {settings.CHROMA_HOST}:{settings.CHROMA_PORT}")
 except Exception as e:
     error_msg = f"❌ ChromaDB 연결 실패: {e}\nNAS 또는 ChromaDB 서버가 실행 중인지 확인하세요."
     print(error_msg)

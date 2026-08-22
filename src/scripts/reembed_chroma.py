@@ -5,10 +5,10 @@ import sys
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
-from chromadb.utils.embedding_functions import OllamaEmbeddingFunction
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 from chroma_client import get_chroma_client
+from embedding_function import get_embedding_function
 from config import settings
 
 # 1. 시놀로지 NAS ChromaDB 연결
@@ -19,12 +19,9 @@ except Exception as e:
     print(f"❌ ChromaDB 연결 실패: {e}")
     exit(1)
 
-# 2. Ollama 기반 임베딩 (GPU VRAM 사용)
-print("⏳ Ollama (bge-m3) 임베딩 모델 연결 중...")
-ollama_ef = OllamaEmbeddingFunction(
-    url=f"{settings.OLLAMA_BASE_URL}/api/embeddings",
-    model_name="bge-m3:latest"
-)
+# 2. 임베딩 (Bifrost 경유)
+print("⏳ 임베딩(bge-m3) 연결 중 — Bifrost 경유...")
+ollama_ef = get_embedding_function()
 
 # 3. 빈 컬렉션 연결 (사전에 수동으로 빈 상태여야 함)
 collection = chroma_client.get_or_create_collection(
