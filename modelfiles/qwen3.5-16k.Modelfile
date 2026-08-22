@@ -1,0 +1,18 @@
+# qwen3.5:9b + 컨텍스트 16,384
+#
+# 근거 (2026-08-22 실측, Docs/context_limit_experiment.md 실험 A·F):
+#   num_ctx  4,096 -> 5.65GB (100% GPU)
+#   num_ctx 16,384 -> 6.06GB (100% GPU) · bge-m3 동거 시 합계 6.73GB 확인
+#   num_ctx 32,768 -> 6.62GB (100% GPU) 이나 bge-m3 가 못 낀다(7.28GB 필요)
+#   num_ctx 65,536 -> 78.1% CPU 분할
+# 이 기기의 VRAM 실효 예산은 약 6.7~6.8GB 다.
+#
+# 16,384 를 고른 이유: 100% GPU 를 유지하면서 임베딩 모델과 동시 상주가 가능한
+# 가장 큰 값. 상한(32,768)을 쓰면 채팅<->임베딩 전환마다 약 7초 재적재를 낸다.
+# 기본값 4,096 대비 4배이며, 사고(thinking)가 컨텍스트를 소진해 본문이 비는
+# 실패(실험 D-2)의 여유가 그만큼 늘어난다.
+#
+# top_k / top_p / presence_penalty / temperature 는 원본에서 상속되므로
+# 재지정하지 않는다. 생성 후 `ollama show --parameters` 로 확인할 것.
+FROM qwen3.5:9b
+PARAMETER num_ctx 16384

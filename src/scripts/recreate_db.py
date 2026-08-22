@@ -4,10 +4,10 @@ import sys
 # 상위 디렉토리(src)를 모듈 검색 경로에 추가
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from chromadb.utils import embedding_functions
 
 from chroma_client import get_chroma_client
 from config import settings
+from embedding_function import get_embedding_function
 
 # 1. 시놀로지 NAS ChromaDB 연결 (접속 정보는 .env -> config.settings 에서 온다)
 chroma_client = get_chroma_client()
@@ -28,10 +28,9 @@ print(f"✅ ChromaDB 연결 완료: {settings.CHROMA_HOST}:{settings.CHROMA_PORT
 # [새 컬렉션 생성 및 bge-m3 임베딩 설정]
 # ==========================================
 
-ollama_ef = embedding_functions.OllamaEmbeddingFunction(
-    url="http://127.0.0.1:11434/api/embeddings",
-    model_name="bge-m3:latest"
-)
+# 임베딩은 Bifrost 경유로 통일한다 (src/embedding_function.py).
+# 하드코딩돼 있던 127.0.0.1 주소도 함께 사라진다.
+ollama_ef = get_embedding_function()
 
 print("✨ 새로운 컬렉션을 생성합니다...")
 collection = chroma_client.get_or_create_collection(

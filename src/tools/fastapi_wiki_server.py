@@ -10,13 +10,13 @@ import logger_setup
 logger_setup.setup_logger('fastapi_wiki_server.log')
 
 import uvicorn
-from chromadb.utils.embedding_functions import OllamaEmbeddingFunction
 from fastapi import Depends, FastAPI, HTTPException, Security
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, Field
 
 from chroma_client import get_chroma_client
 from config import settings
+from embedding_function import get_embedding_function
 
 # 1. FastAPI 애플리케이션 초기화
 app = FastAPI(
@@ -25,12 +25,9 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# 2. ChromaDB 및 Ollama 임베딩 초기화
-print("⏳ Ollama (bge-m3) 임베딩 모델 연결 중...")
-ollama_ef = OllamaEmbeddingFunction(
-    url=f"{settings.OLLAMA_BASE_URL}/api/embeddings",
-    model_name="bge-m3:latest"
-)
+# 2. ChromaDB 및 임베딩 초기화 (임베딩은 Bifrost 경유)
+print("⏳ 임베딩(bge-m3) 연결 중 — Bifrost 경유...")
+ollama_ef = get_embedding_function()
 
 try:
     chroma_client = get_chroma_client()
