@@ -54,9 +54,14 @@ ollama show --parameters qwen3.5-16k     # num_ctx 와 상속된 값이 함께 �
 
 1. 브라우저에서 **`http://127.0.0.1:18080`** 을 연다.
 2. **Providers → `ollama`** 를 선택한다.
-3. 모델 목록에 위에서 만든 파생 모델명을 추가한다 (`qwen3.5-16k` 등).
-   * 모델명은 Ollama 에 등록된 이름과 **정확히** 같아야 한다.
-   * 임베딩 모델처럼 태그가 필요한 경우 태그까지 적는다 (`bge-m3:latest`).
+3. 모델 목록에 위에서 만든 파생 모델명을 추가한다.
+   * 🔴 **태그까지 적어야 한다 — `qwen3.5-16k:latest`.** `ollama create` 로 만든 모델은
+     `:latest` 가 붙으며, **태그 없이 부르면 `400 could not auto resolve a provider`** 다
+     (2026-08-22 실측). `bge-m3:latest` 와 같은 규칙이다.
+   * 원본 모델은 태그가 이름에 포함돼 있다 (`qwen3.5:9b`).
+   * **allow list 에 저장되는 이름도 태그까지 포함해야 한다.** 이름은 정규화되지 않고
+     그대로 비교된다 — `qwen3.5-16k:latest` 가 등록돼 있을 때 `ollama/qwen3.5-16k`
+     요청은 `403 model_blocked` 다 (2026-08-22 실측).
 4. 저장한다. 설정은 볼륨(`./data`)에 남아 컨테이너를 다시 만들어도 유지된다.
 
 > **`All Models` 를 명시 목록으로 바꾼다면** 현재 쓰이는 모델을 **전부** 넣어야 한다.
@@ -67,7 +72,7 @@ ollama show --parameters qwen3.5-16k     # num_ctx 와 상속된 값이 함께 �
 > | `qwen3.5:9b` | `wiki_agent` (`.env` 의 `MODEL_NAME`), 벤치마크 |
 > | `qwen2.5-coder:7b` | 벤치마크 (`BENCHMARK_MODELS` 기본값) |
 > | `bge-m3:latest` | **임베딩 4곳** — 태그까지 정확히 |
-> | `qwen3.5-16k` · `qwen2.5-coder-16k` · `gemma4-e4b-64k` | 위에서 만든 파생 모델 |
+> | `qwen3.5-16k:latest` · `qwen2.5-coder-16k:latest` · `gemma4-e4b-64k:latest` | 위에서 만든 파생 모델 — **태그 필수** |
 >
 > `impact_analysis.py` 는 `groq/openai/gpt-oss-120b` 를 쓰므로 **groq 프로바이더** 쪽이고
 > Ollama 서버 목록과 무관하다. Open WebUI 에서 직접 고르는 모델은 지금은 Ollama 를
@@ -89,6 +94,7 @@ curl -s http://127.0.0.1:18080/v1/chat/completions \
 ## 3. 소비처 전환
 
 `.env` 의 `MODEL_NAME` 을 파생 모델명으로 바꾸면 `wiki_agent` 가 그것을 쓴다.
+**`:latest` 를 빼먹지 말 것** — `MODEL_NAME=qwen3.5-16k:latest`.
 Open WebUI 는 모델 선택 목록에서 고른다.
 
 > ⚠️ **원본 모델은 그대로 둔다.** 파생 모델은 컨텍스트가 커서 임베딩과의 동시 상주 여유가
