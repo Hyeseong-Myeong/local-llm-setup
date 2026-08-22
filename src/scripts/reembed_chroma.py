@@ -8,8 +8,8 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 from chroma_client import get_chroma_client
-from embedding_function import get_embedding_function
 from config import settings
+from embedding_function import get_embedding_function
 
 # 1. 시놀로지 NAS ChromaDB 연결
 try:

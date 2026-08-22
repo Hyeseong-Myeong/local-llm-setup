@@ -15,8 +15,8 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, Field
 
 from chroma_client import get_chroma_client
-from embedding_function import get_embedding_function
 from config import settings
+from embedding_function import get_embedding_function
 
 # 1. FastAPI 애플리케이션 초기화
 app = FastAPI(

@@ -34,8 +34,8 @@ from watchdog.observers import Observer
 
 import prompts  # 새로 생성한 프롬프트 파일을 가져옵니다.
 from chroma_client import get_chroma_client
-from embedding_function import get_embedding_function
 from config import settings
+from embedding_function import get_embedding_function
 
 load_dotenv()
 
