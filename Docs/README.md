@@ -18,8 +18,10 @@
   * 사용 모델: `qwen3.5:9b` (OpenWebUI나 API 요청 파라미터를 통해 온도, 프롬프트 등 제어)
   * AMD RX 6600 XT 그래픽 카드의 하드웨어 가속(ROCm)을 사용하기 위해 시스템 부팅 시 `HSA_OVERRIDE_GFX_VERSION=10.3.0` 환경 변수를 강제로 주입하여 GPU 성능을 100% 활용합니다.
 * **ChromaDB (벡터 데이터베이스):**
-  * 도커(Docker Desktop) 컨테이너로 구동되며, 문서 검색 시 RAG(검색 증강 생성)를 위한 임베딩 데이터를 저장합니다.
+  * **시놀로지 NAS의 도커 컨테이너**로 구동되며, 문서 검색 시 RAG(검색 증강 생성)를 위한 임베딩 데이터를 저장합니다. 개발 PC의 Docker Desktop에서 도는 것이 아닙니다.
   * Host: `.env`의 `CHROMA_HOST` / `CHROMA_PORT`로 설정 (Tailscale IP 사용)
+  * 접속은 `src/chroma_client.py`의 `get_chroma_client()` 하나로 일원화돼 있습니다. 소비처가 직접 `HttpClient`를 만들지 않습니다.
+  * NAS 쪽 바인딩·격리 구성은 [`troubleshooting.md`](troubleshooting.md) 섹션 16 참조.
 
 ### 2. 자동화 에이전트 (Wiki Agent & Discord Bot)
 * **`discord_bot.py`:**
@@ -36,12 +38,16 @@
 
 윈도우 부팅 시, 시작 프로그램 폴더에 등록된 `ai-server-start.bat` 스크립트가 다음과 같은 순서로 시스템을 조용히 자동 구성합니다.
 
-1. **환경 변수 주입:** AMD GPU 인식 및 최적화를 위한 설정 세팅
-2. **좀비 프로세스 정리:** 꼬여있는 기존 Ollama 프로세스 완전 종료
-3. **Docker Desktop 구동:** 벡터 DB(Chroma) 실행을 위한 도커 컨테이너 로드 대기 (최대 30초)
-4. **Ollama 백그라운드 실행:** `powershell` 명령어를 통해 CMD 창 팝업 없이 완전한 **숨김(Hidden) 상태**로 `ollama serve` 실행
-5. **Discord Bot 실행:** 디스코드 채널 모니터링을 담당하는 봇을 백그라운드로 구동
-6. **Wiki Agent 실행:** `pythonw.exe`를 사용하여 콘솔 창 없이 백그라운드에서 `wiki_agent.py` 실행 및 자동화 모니터링 개시
+1. **환경 변수 주입:** AMD GPU 인식 및 최적화를 위한 설정 세팅 (`HSA_OVERRIDE_GFX_VERSION`, `OLLAMA_HOST`, `OLLAMA_NUM_THREADS` 등)
+2. **좀비 프로세스 정리:** 꼬여있는 기존 `ollama.exe` / `llama-server.exe` 완전 종료
+3. **Docker Desktop 구동:** 엔진이 올라올 때까지 대기. **여기서 뜨는 것은 Bifrost 게이트웨이와 Open WebUI이며, 벡터 DB(Chroma)는 NAS에 있어 무관합니다.**
+4. **Ollama 백그라운드 실행:** `powershell`로 CMD 창 팝업 없이 완전한 **숨김(Hidden) 상태**로 `ollama serve` 실행
+5. **Bifrost 게이트웨이 실행:** `bifrost/start_bifrost.py`. 모든 LLM 호출이 이 게이트웨이를 경유합니다
+6. **FastAPI 툴 서버 실행:** `pythonw.exe`로 `src/tools/fastapi_wiki_server.py` 백그라운드 구동
+7. **Wiki Agent 실행:** `pythonw.exe`로 `src/agent/wiki_agent.py` 실행 및 자동화 모니터링 개시
+8. **Discord Bot 실행:** 디스코드 채널 모니터링 봇을 백그라운드로 구동
+
+> `ai-server-start.bat`은 저장소가 아니라 **윈도우 시작 프로그램 폴더**에 있습니다. 저장소 루트의 `restart.bat`은 `shutdown.bat` 실행 후 이 스크립트를 다시 호출합니다.
 
 ---
 
@@ -50,13 +56,21 @@
 ```text
 C:\local_LLM\
 │
-├── .env                  # 모델명, DB 주소, Langfuse API 키 등 비밀 환경변수 모음
-├── config.py             # .env의 환경변수를 파이썬 앱 내 설정 객체로 로드
-├── prompts.py            # AI 에이전트에게 지시할 카테고리 분류 및 위키 컴파일 프롬프트
-├── discord_bot.py        # 디스코드 채널(archy 등) 모니터링 및 스크래핑 봇
-├── wiki_agent.py         # 핵심 백그라운드 AI 에이전트 실행 파일
-├── shutdown.bat          # 관련 백그라운드 데몬(pythonw.exe) 일괄 강제 종료 스크립트
-└── README.md             # 현재 문서
+├── .env                      # 모델명, DB 주소, 토큰 등 비밀 환경변수 모음 (커밋 대상 아님)
+├── .env.example              # 위 파일의 키 목록 템플릿
+├── restart.bat               # shutdown.bat 실행 후 시작 스크립트를 다시 호출
+├── shutdown.bat              # 백그라운드 데몬(pythonw.exe) 일괄 강제 종료
+├── bifrost/                  # LLM 게이트웨이 (docker-compose.yml, bifrost.yaml, start_bifrost.py)
+├── scripts/                  # CI 보조 스크립트 (benchmark_bifrost.py, impact_analysis.py)
+├── Docs/                     # README.md, troubleshooting.md 등 문서
+└── src/
+    ├── config.py             # .env의 환경변수를 파이썬 설정 객체로 로드
+    ├── chroma_client.py      # ChromaDB 접속 공통 팩토리
+    ├── prompts.py            # 카테고리 분류 및 위키 컴파일 프롬프트
+    ├── logger_setup.py       # 로거 초기화 (인코딩 크래시 방지)
+    ├── agent/                # wiki_agent.py, discord_bot.py
+    ├── tools/                # fastapi_wiki_server.py
+    └── scripts/              # recreate_db.py, reembed_chroma.py
 ```
 
 ---
