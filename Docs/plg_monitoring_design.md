@@ -713,7 +713,7 @@ $Tasks = @(
 
 > 🔴 **7번부터 NAS 배포 방식이 바뀌었다 — Jenkins 파이프라인 전용이다.**
 > `monitoring/nas/`에 사람이 직접 `docker compose up -d` 하던 방식(1~6번)은
-> 더 이상 쓰지 않는다. NAS 배포 디렉터리(`/volume1/docker/monitoring-nas`)에는
+> 더 이상 쓰지 않는다. NAS 배포 디렉터리(`/volume1/docker/ci-deploys/monitoring-nas`)에는
 > `.env` 파일이 없다 — `GF_SECURITY_*` · `TAILNET_BIND_IP` · `DISCORD_WEBHOOK_URL_*`
 > 전부 Jenkins Credentials 에서 주입된다(`monitoring/nas/Jenkinsfile`). 수동으로
 > `docker compose up -d` 를 돌리면 `:?` 가드에 막혀 반드시 실패한다 — 고장이
