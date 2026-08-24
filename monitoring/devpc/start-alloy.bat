@@ -19,4 +19,7 @@ if "%NAS_TAILNET_IP%"=="" (
     exit /b 1
 )
 
-"C:\GrafanaAlloy\alloy.exe" run --server.http.listen-addr=127.0.0.1:12345 --storage.path=C:\GrafanaAlloy\data "%SCRIPT_DIR%config.alloy"
+:: Hidden background launch - a plain foreground call here keeps the wrapping
+:: cmd window open forever (alloy.exe never exits on its own), so restart.bat
+:: never closes it. Mirrors the Ollama launch in ai-server-start.bat.
+powershell -WindowStyle Hidden -Command "Start-Process -WindowStyle Hidden -FilePath 'C:\GrafanaAlloy\alloy.exe' -ArgumentList 'run','--server.http.listen-addr=127.0.0.1:12345','--storage.path=C:\GrafanaAlloy\data','%SCRIPT_DIR%config.alloy'"
