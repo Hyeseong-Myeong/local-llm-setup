@@ -7,7 +7,7 @@
 > **작성일:** 2026-08-23
 > **관련 문서:** [`troubleshooting.md`](troubleshooting.md) 섹션 14·16·17·18, [`context_limit_experiment.md`](context_limit_experiment.md)
 > **성격:** 구축 **전에** 무엇을 왜 모으는지 확정하는 설계 문서. 구축 결과는 이후 별도 절에 기록한다.
-> **상태:** 2026-08-24 기준 **10장 1~8번 배포·검증 완료**(PR #36~#40 머지, main 반영). 배포 중 발견한 문제 9건은 [`troubleshooting.md`](troubleshooting.md) 섹션 18 참조. 남은 것: NAS `couchdb-obsidian-sync`·`hyeseongkit-hub`·`hyeseongkit-jenkins` 3개 컨테이너 syslog 드라이버 적용(확정 내역 #9), `troubleshooting.md` 상단 TODO 2건.
+> **상태:** 2026-08-24 기준 **10장 1~8번 배포·검증 완료**(PR #36~#41 머지, main 반영). NAS 4개 컨테이너 syslog 전환(확정 내역 #9)과 Jenkins 파이프라인 Smoke check 모두 완료·통과. 배포 중 발견한 문제 10건은 [`troubleshooting.md`](troubleshooting.md) 섹션 18 참조. 남은 것: `troubleshooting.md` 상단 TODO 2건(장기 관찰용, 급하지 않음).
 
 ---
 
