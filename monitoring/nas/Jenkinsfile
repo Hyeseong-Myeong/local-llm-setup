@@ -20,6 +20,19 @@
 //       grafana-secret-key        -> GF_SECURITY_SECRET_KEY
 //       nas-tailnet-ip            -> TAILNET_BIND_IP
 
+// docker compose 는 ps/up 등 어떤 서브커맨드든 파일 전체의 ${VAR} 를 먼저
+// 보간(interpolate)한다 — Smoke check 가 Deploy 와 별도 sh 블록이라 시크릿이
+// 안 보여 `docker compose ps` 부터 막혔다(실측). 두 스테이지가 같은 바인딩을
+// 쓰도록 한 곳에 정의해 재사용한다.
+def composeCredentials = [
+    string(credentialsId: 'discord-webhook-info', variable: 'DISCORD_WEBHOOK_URL_INFO'),
+    string(credentialsId: 'discord-webhook-warning', variable: 'DISCORD_WEBHOOK_URL_WARNING'),
+    string(credentialsId: 'discord-webhook-error', variable: 'DISCORD_WEBHOOK_URL_ERROR'),
+    string(credentialsId: 'grafana-admin-password', variable: 'GF_SECURITY_ADMIN_PASSWORD'),
+    string(credentialsId: 'grafana-secret-key', variable: 'GF_SECURITY_SECRET_KEY'),
+    string(credentialsId: 'nas-tailnet-ip', variable: 'TAILNET_BIND_IP')
+]
+
 pipeline {
     agent any
 
@@ -51,14 +64,7 @@ pipeline {
 
         stage('Deploy') {
             steps {
-                withCredentials([
-                    string(credentialsId: 'discord-webhook-info', variable: 'DISCORD_WEBHOOK_URL_INFO'),
-                    string(credentialsId: 'discord-webhook-warning', variable: 'DISCORD_WEBHOOK_URL_WARNING'),
-                    string(credentialsId: 'discord-webhook-error', variable: 'DISCORD_WEBHOOK_URL_ERROR'),
-                    string(credentialsId: 'grafana-admin-password', variable: 'GF_SECURITY_ADMIN_PASSWORD'),
-                    string(credentialsId: 'grafana-secret-key', variable: 'GF_SECURITY_SECRET_KEY'),
-                    string(credentialsId: 'nas-tailnet-ip', variable: 'TAILNET_BIND_IP')
-                ]) {
+                withCredentials(composeCredentials) {
                     sh '''
                         cd "${DEPLOY_DIR}"
                         docker compose up -d
@@ -69,13 +75,15 @@ pipeline {
 
         stage('Smoke check') {
             steps {
-                sh '''
-                    sleep 5
-                    cd "${DEPLOY_DIR}"
-                    docker compose ps
-                    curl -sf http://127.0.0.1:13090/-/healthy && echo " - prometheus OK"
-                    curl -sf http://127.0.0.1:13100/ready && echo " - loki OK"
-                '''
+                withCredentials(composeCredentials) {
+                    sh '''
+                        sleep 5
+                        cd "${DEPLOY_DIR}"
+                        docker compose ps
+                        curl -sf http://127.0.0.1:13090/-/healthy && echo " - prometheus OK"
+                        curl -sf http://127.0.0.1:13100/ready && echo " - loki OK"
+                    '''
+                }
             }
         }
     }
