@@ -79,12 +79,32 @@ pipeline {
                     // Jenkins 는 별도 컨테이너(jenkins_default 브리지)라 127.0.0.1 은
                     // Jenkins 자신의 루프백이다 - Prometheus/Loki 의 127.0.0.1 바인딩엔
                     // 안 닿는다(실측: curl exit 7). tailnet 바인딩으로 확인한다.
+                    //
+                    // 🔴 고정 sleep 5 + 단발 curl로는 부족했다(실측: 빌드 #5, 컨테이너가
+                    // 이미 2시간째 떠 있었는데도 Loki `/ready`만 curl exit 22로 실패,
+                    // 직후 수동 재현은 바로 성공). 원인을 단정할 근거가 아직 부족하니
+                    // (이 지점에 도달한 첫 빌드라 반복 재현 데이터가 없다), 재발해도
+                    // 파이프라인이 안 죽도록 재시도로 흡수한다.
                     sh '''
-                        sleep 5
                         cd "${DEPLOY_DIR}"
                         docker compose ps
-                        curl -sf "http://${TAILNET_BIND_IP}:13090/-/healthy" && echo " - prometheus OK"
-                        curl -sf "http://${TAILNET_BIND_IP}:13100/ready" && echo " - loki OK"
+
+                        check() {
+                            name="$1"; url="$2"
+                            for i in $(seq 1 10); do
+                                if curl -sf "$url" >/dev/null 2>&1; then
+                                    echo " - ${name} OK (attempt ${i}/10)"
+                                    return 0
+                                fi
+                                echo " - ${name} not ready yet (attempt ${i}/10), retrying in 3s..."
+                                sleep 3
+                            done
+                            echo " - ${name} FAILED after 10 attempts"
+                            return 1
+                        }
+
+                        check prometheus "http://${TAILNET_BIND_IP}:13090/-/healthy"
+                        check loki "http://${TAILNET_BIND_IP}:13100/ready"
                     '''
                 }
             }

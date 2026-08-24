@@ -1,6 +1,7 @@
 // NAS 컨테이너의 syslog 로그를 받아 Loki 로 보낸다.
 // 구축 순서 2번 (Docs/plg_monitoring_design.md 10장) — 우선 chromadb 로 검증한다.
 // 이후 couchdb-obsidian-sync · hyeseongkit-hub · hyeseongkit-jenkins 도 같은 방식으로 추가한다(한 번에 하나씩).
+// 진행 상황(2026-08-24): 4개 전부 완료(검증됨) — chromadb·couchdb-obsidian-sync·hyeseongkit-hub·hyeseongkit-jenkins.
 
 // 컨테이너가 logging.tag="{{.Name}}" 으로 보낸 이름이 RFC5424 APP-NAME 필드로 들어온다.
 // 이 필드를 syslog 내부 라벨(__syslog_message_app_name)에서 꺼내 "container" 라벨로 승격한다.

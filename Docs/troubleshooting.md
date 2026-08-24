@@ -2,6 +2,14 @@
 
 이 문서는 Open WebUI 및 로컬 모델(Ollama) 사용 중 발생하는 흔한 에러들과 해결 방법을 모아둔 트러블슈팅 가이드입니다.
 
+## 🔴 TODO — 재확인 필요
+
+* **`restart.bat` 후 에이전트 프로세스 일시 중복** (섹션 18, 미해결 항목) — `wiki_agent.py`·`discord_bot.py`가 정상값(2개)이 아니라 4개씩 뜬 적이 1회 있었으나 재현 안 됨. **재발 시** `shutdown.bat` 실행 중 프로세스 목록을 남겨 원인을 특정할 것.
+* **`OLLAMA_DEBUG` 끈 상태의 장기 로그 생성량 실측** (`Docs/plg_monitoring_design.md` 11-2·6-4) — 시작 스크립트에서는 이미 꺼둔 상태(확인됨)지만, 보존 정책을 재조정할 만큼 충분한 기간의 실측 데이터가 아직 없다. **몇 주 누적 후** `log_file_bytes{name="ollama"}` 추이를 확인하고 필요하면 9-1·9-3의 보존 정책을 재조정할 것.
+* **Jenkins 파이프라인이 Smoke check까지 한 번도 성공 못함 — 재시도 로직 추가, 다음 빌드로 검증 대기** (2026-08-24) — `plg-monitoring-nas` 빌드 1~5번 전체 로그를 대조한 결과, 매번 다른 지점에서 죽으며 실제로는 한 단계씩 전진해왔다: #1 Checkout(Jenkinsfile 못 찾음) → #3 Deploy(자격증명 전부 빈 값, `2ed33e2`로 해결 확인) → #4 Smoke check(Jenkins 자신의 루프백 `curl exit 7`, `d4871b7`로 해결 확인) → #5 Smoke check(Loki `/ready`만 `curl exit 22`). **#5는 파이프라인이 이 지점에 도달한 첫 빌드**라 반복 재현 데이터가 없다 — `docker logs loki`엔 에러 없고 직후 수동 재현은 바로 `200 ready` 성공.
+  * **조치:** 원인을 단정할 근거가 부족한 채로 재시도 없이 단발 curl로 죽는 구조 자체가 문제라고 보고, `monitoring/nas/Jenkinsfile`의 Smoke check을 고정 `sleep 5` + 단발 curl에서 **최대 10회(3초 간격) 재시도 루프**로 교체(`fix/jenkins-pipeline-first-success` 브랜치). curl 버전 의존 플래그(`--retry-all-errors` 등) 대신 셸 루프로 이식성 확보.
+  * **검증 대기:** 다음 Build Now 결과로 Smoke check을 실제로 통과하는지 확인할 것 — 통과하면 이 항목은 닫는다.
+
 ---
 
 ## 1. 웹 스크래핑(Jina Reader) 사용 시 401 Unauthorized 에러
