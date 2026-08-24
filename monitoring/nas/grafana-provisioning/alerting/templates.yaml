@@ -1,0 +1,18 @@
+# Discord 메시지를 기본(라벨·주석 전체 덤프) 대신 요약 1~2줄 + 바로가기 링크로
+# 압축한다 — "주요 내용만, 빠르게 들어가서 확인" 요구사항 대응.
+# 두 컨택포인트(title/message)가 공용으로 참조한다(contact-points.yaml).
+apiVersion: 1
+
+templates:
+  - orgId: 1
+    name: plg.title
+    template: |
+      {{ define "plg.title" }}{{ if eq .Status "firing" }}🔴 발생{{ else }}✅ 해결{{ end }} · {{ .CommonLabels.alertname }}{{ end }}
+
+  - orgId: 1
+    name: plg.message
+    template: |
+      {{ define "plg.message" }}{{ range .Alerts }}{{ .Annotations.summary }}
+      {{ end }}
+      🔗 [Grafana에서 확인]({{ (index .Alerts 0).GeneratorURL }})
+      {{ end }}

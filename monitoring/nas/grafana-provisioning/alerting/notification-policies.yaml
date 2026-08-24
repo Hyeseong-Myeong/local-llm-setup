@@ -1,12 +1,15 @@
 # 심각도 라벨(severity)로 3개 Discord 채널에 나눠 보낸다 (9장).
 # group_wait/repeat_interval 을 등급별로 다르게 둔다 — 크리티컬은 빨리·자주,
 # info 는 묶어서 하루 한 번(9-2: "🟢 등급은 일간 요약으로 묶는다").
+# group_by 를 빈 배열로 둔다 — alertname 별로 나누면(예전 값) 같은 등급에서
+# 여러 규칙이 동시에 발동할 때 메시지가 그만큼 따로 온다. 빈 배열은 같은
+# 등급이면 전부 한 메시지로 묶는다(알림 수를 줄이는 게 목적이라 이쪽이 맞다).
 apiVersion: 1
 
 policies:
   - orgId: 1
     receiver: discord-warning
-    group_by: ["alertname"]
+    group_by: []
     group_wait: 30s
     group_interval: 5m
     repeat_interval: 4h
@@ -14,6 +17,7 @@ policies:
       - receiver: discord-critical
         object_matchers:
           - ["severity", "=", "critical"]
+        group_by: []
         group_wait: 10s
         group_interval: 1m
         repeat_interval: 1h
@@ -22,6 +26,7 @@ policies:
       - receiver: discord-warning
         object_matchers:
           - ["severity", "=", "warning"]
+        group_by: []
         group_wait: 30s
         group_interval: 5m
         repeat_interval: 4h
@@ -30,7 +35,7 @@ policies:
       - receiver: discord-info
         object_matchers:
           - ["severity", "=", "info"]
-        group_by: ["alertname"]
+        group_by: []
         group_wait: 1m
         group_interval: 24h
         repeat_interval: 24h
