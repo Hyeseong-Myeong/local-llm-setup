@@ -780,4 +780,89 @@ netstat -tlnp | grep 8000        # Synology busybox에는 ss가 없다
 * **문자열 검색으로 "없음"을 증명할 때는 접미 확장형을 조심하라.** 상류 이슈 작성자는 패킷 캡처에서 `grep max_tokens`가 0건이라 "전달되지 않는다"고 보고했다가 스스로 정정했다 — `max_tokens`는 **`max_completion_tokens`의 부분 문자열이 아니라서** 잡히지 않았을 뿐, 값은 내내 전선 위에 있었다. 부재를 근거로 결론을 세울 때는 검색어가 변형된 이름을 놓치는지 먼저 따져야 한다.
 * **제약이 무시됐는지 판정할 때는 3상태로 둔다.** "상한이 걸렸다"와 "답이 원래 짧았다"는 다르다. 2상태로 만들면 후자를 전자로 오독해, 게이트웨이가 파라미터를 버리고 있는데도 정상으로 보인다.
 
+---
+
+## 18. 🌐 [2026-08-23~24] PLG 모니터링 구축 — 실배포 중 발견한 문제 9건
+
+`Docs/plg_monitoring_design.md`의 구축 순서(1~8번)를 실제로 배포·검증하는 과정에서, 설계 단계에는 없던 문제가 연달아 드러났다. 전부 **실측 없이는 예측할 수 없었던 것들**이라 따로 기록한다.
+
+### 🔴 증상 1: exporter가 24시간 넘게 멈춘 채로 "정상처럼 보이는" 값을 계속 냈다
+* **관찰:** `local_exporter.py`의 `/metrics`가 계속 200을 반환하고 값도 그럴듯했다. 그런데 `host_uptime_seconds`를 3초 간격으로 두 번 호출해도 **완전히 같은 값**이었다 — 실제로는 죽어 있었다는 뜻.
+* **원인:** 백그라운드 수집이 **단일 스레드**다. `collection.count()`(chromadb) 호출에 타임아웃이 없는데, 마침 이 세션에서 진단 목적으로 `chromadb`를 두 번 재시작시켰다. 재시작 도중 걸린 요청이 응답 없이 영원히 대기하면서 그 뒤로 모든 지표 수집이 통째로 멈췄다. 캐시가 남아 있어 `/metrics`는 계속 이전 값을 냈고, 그래서 "죽었다"는 신호(에러·NoData)가 전혀 나지 않았다 — **가장 나쁜 형태의 실패**(조용히 멈췄는데 겉보기엔 정상).
+* **해결:** `collection.count()`와 임베딩 호출을 별도 스레드로 감싸 타임아웃을 걸었다(`_call_with_timeout`, `exporter/local_exporter.py`). 타임아웃 나면 해당 항목만 `*_scrape_error=1`로 표시하고 나머지 수집은 계속된다. 스레드는 강제 종료가 안 되므로 타임아웃 난 시도 자체는 새지만, 수집 주기(30초)마다 하나씩이라 감당 가능한 수준으로 판단했다.
+* **부수 발견:** 같은 세션에서 exporter 인스턴스가 중복 기동된 것도 발견(수동 테스트 후 정리를 안 해서) — 4개 프로세스 중 하나(가장 먼저 뜬 것)만 포트를 쥐고 있었고, 그게 죽어 있던 것. `Get-NetTCPConnection -LocalPort <포트>`로 실제 포트 소유 PID를 먼저 확인하고 정리할 것.
+
+### 🔴 증상 2: Docker `syslog` 드라이버의 실제 전송 포맷이 컨테이너마다 다르다
+* **관찰:** Alloy 의 `loki.source.syslog` 리시버를 `syslog_format = "rfc5424"`로 두면 개발 PC의 bifrost·open-webui 로그가 `loki_source_syslog_entries_total=0`(파싱 실패조차 아니고 아예 안 잡힘)으로 안 들어왔다.
+* **원인 규명 (raw 소켓으로 직접 확인):** Alloy 를 끄고 그 포트에 파이썬 UDP 리스너를 직접 붙여 실제로 도착하는 바이트를 봤다.
+  ```
+  b'<30>Aug 23 07:06:25 bifrost[149]: {"level":"info",...}\n'
+  ```
+  버전 필드도, ISO8601 타임스탬프도 없다 — **RFC5424가 아니라 RFC3164(BSD syslog) 형태.** `syslog-format` 옵션을 안 준 컨테이너(bifrost, open-webui)의 Docker 기본 전송 포맷이 이거였다.
+* **1차 실수:** 이 발견을 근거로 **NAS 쪽(chromadb) Alloy 설정까지 rfc3164로 바꿨다가 오히려 깨졌다.** `docker inspect chromadb`를 확인해보니 chromadb는 `logging.options.syslog-format=rfc5424`를 **명시적으로 지정**하고 있었다 — 그래서 원래 값(rfc5424)이 맞았다. 한 곳에서 확인한 사실을 검증 없이 다른 대상에 그대로 적용한 것이 실수였다.
+* **해결:** `syslog-format`을 명시한 컨테이너는 그 값을, 안 한 컨테이너는 실측한 형태(rfc3164)를 리시버에 맞춘다. **컨테이너마다 개별로 `docker inspect`를 확인해야지, 하나의 결론을 일반화하면 안 된다.**
+
+### 🔴 증상 3: Docker Desktop 컨테이너의 syslog가 Windows 호스트에 안 닿는다
+* **관찰:** `syslog-address: udp://127.0.0.1:51400`로 설정했는데, Alloy(Windows 바이너리, 호스트에서 직접 실행)에 아무 것도 안 들어왔다.
+* **원인:** Docker Desktop은 `dockerd`를 **WSL2 VM 안에서** 돌린다. 컨테이너의 로깅 드라이버가 참조하는 `127.0.0.1`은 그 VM 자신의 루프백이지 Windows 호스트가 아니다.
+* **1차 시도와 그 실패:** `host.docker.internal`로 바꾸면 컨테이너 관점에서 `192.168.65.254`로 풀리는 것까지는 확인했으나, 그 뒤로 Alloy가 여전히 아무 것도 못 받았다. **WSL 가상 어댑터(`vEthernet (WSL)`, `172.23.32.1`) IP로 리스너를 직접 옮기는 우회**를 시도했으나 이것도 실패.
+* **진짜 원인 (raw 소켓으로 재확인):** Alloy를 끄고 파이썬 UDP 리스너를 `0.0.0.0`에 붙여보니, `host.docker.internal`로 보낸 패킷이 실제로는 **Windows 호스트의 `127.0.0.1`로 릴레이돼 도착**했다. 즉 리스너는 원래대로 `127.0.0.1`에 두는 게 맞았고, **막고 있던 건 Windows 방화벽**이었다 — `vEthernet (WSL)`이 Public 프로파일 취급을 받아 인바운드가 기본 차단됐고, `alloy.exe`에 대한 인바운드 허용 규칙이 아예 없었다.
+* **해결:** syslog-address는 `host.docker.internal`, Alloy 리스너는 `127.0.0.1:51400` 그대로, 방화벽에 `alloy.exe` 전용 인바운드 허용 규칙 추가:
+  ```powershell
+  New-NetFirewallRule -DisplayName "LocalLLM-Alloy-Syslog" -Direction Inbound -Protocol UDP `
+    -LocalPort 51400 -RemoteAddress 127.0.0.1 -Program "C:\GrafanaAlloy\alloy.exe" -Action Allow -Profile Any
+  ```
+  최초 규칙은 `RemoteAddress`를 WSL 어댑터 대역(`172.23.32.0/20`)으로 잘못 좁혀서 또 막혔다 — 실제 도착 주소(`127.0.0.1`)와 규칙의 허용 대상이 달랐던 것. **추측으로 방화벽 범위를 좁히지 말고, raw 소켓으로 실제 도착지를 먼저 확인해야 한다.**
+
+### 🔴 증상 4: Grafana 알림 규칙이 정상 상태에서 계속 오탐 발동
+* **관찰:** 조건을 하나도 안 건드렸는데 `agent_process_count`, `wiki_collection_documents` 급감, chromadb 응답 주체 확인 규칙이 **DatasourceNoData**로 Discord에 발동했다. 실제 값은 전부 정상(`agent_process_count=2`, gpu_ratio=1.0 등)이었다.
+* **원인:** `agent_process_count != 2`, `chroma_responding_container == 0 and chroma_http_up == 1` 같은 **필터식**은 조건을 만족하는 게 없으면(=정상 상태) **빈 벡터**를 반환한다. Grafana 알림 규칙은 기본적으로 빈 결과를 "정상(OK)"이 아니라 **"NoData"로 보고, 그 NoData를 알림으로 처리**한다 — 즉 이 유형의 필터식은 "정상일 때마다 매번 오탐"하는 구조였다.
+* **해결:** 조건에 `bool` 비교를 써서 **항상 값이 존재하게** 바꿨다(`agent_process_count != bool 2` → 0 또는 1이 항상 나옴). 추가로 `noDataState: OK`를 명시해 이중으로 막았다. 진짜로 "데이터가 통째로 없어져야 알림"인 규칙(개발 PC 메트릭 부재 감지)만 `noDataState: Alerting`을 의도적으로 유지했다.
+* **교훈:** PromQL 필터식을 알림 조건으로 쓸 때는 **"조건을 만족하는 게 없을 때 쿼리가 빈 결과를 내는지"**부터 확인해야 한다. `existence-check`(예: `gt -1`) 패턴은 빈 결과 앞에서 무력하다 — `bool` 비교로 항상 값이 존재하게 만드는 쪽이 근본적으로 안전하다.
+
+### 🔴 증상 5: 알림 규칙이 참조한 메트릭이 애초에 존재하지 않았다
+* **관찰:** `chroma_bound_all_interfaces` 규칙도 DatasourceNoData로 발동했다.
+* **원인:** 설계 문서(`plg_monitoring_design.md` 9-1 표)의 메트릭명을 실측 없이 그대로 알림 규칙에 옮겼는데, **그런 이름의 메트릭이 exporter에 없었다.** `exporter/nas_exporter.py`가 실제로 내는 이름은 `container_bound_all_interfaces{container="chromadb"}`(범용 컨테이너 지표에 라벨로 대상을 구분하는 형태)였다.
+* **해결:** `curl .../api/v1/query?query=<메트릭명>`로 실제 존재 여부를 먼저 확인한 뒤 규칙을 고쳤다.
+* **교훈:** 이 프로젝트에 이미 있던 원칙("실측 없이 문서를 베끼지 말 것")을 알림 규칙 작성 시에는 건너뛰었다가 걸렸다. **설계 문서에 적힌 메트릭명도 실측 확인 대상에서 예외가 아니다.**
+
+### 🔴 증상 6: Synology ACL이 활성화된 볼륨에서 `chown`이 안 먹는다
+* **관찰:** Jenkins 컨테이너(uid 1000, DSM에 대응하는 계정 없음)가 새로 만든 디렉터리에 못 썼다(`Permission denied`). `chown -R 1000:1000`을 실행했는데도 `synoacltool -get`의 Owner가 계속 `hyeseong_admin`으로 나왔다.
+* **원인:** Synology의 ACL 활성 볼륨에서는 **`chown`이 파일시스템 레벨 소유자는 바꿔도 ACL 메타데이터의 소유자 정보는 갱신하지 않는다.** 겉보기 모드 비트가 `drwxrwxrwx+`(777)로 보여도 `+`가 붙은 순간 실제 통제권은 ACL에 있고, 명시적 `deny` 엔트리가 앞쪽에 있으면 뒤의 허용과 무관하게 막힌다.
+* **1차 시도 실패:** `synoacltool -copy <이미 되는 디렉터리> <새 디렉터리>`로 검증된 ACL을 복사해도 반영이 안 됐다 — 상위 디렉터리(`/volume1/docker`)의 상속이 계속 재적용되며 원래대로 되돌아갔다. root 권한(`sudo`) 없이 실행한 것도 원인 중 하나였다(무권한 상태에서도 에러 없이 조용히 실패).
+* **해결:** `synoacltool -addace`로 **UID를 직접 지정**해 전용 ACE를 추가했다(이름 없는 raw UID를 대상으로 지정할 수 있는 것이 `-add`와 `-addace`의 차이):
+  ```bash
+  sudo synoacltool -addace /volume1/docker/ci-deploys user:1000:allow:rwxpdDaARWcCo:fd--
+  ```
+* **교훈:** Synology에서 "이미 되는 폴더처럼 chown/ACL 복사를 했는데도 안 되면", **상위 폴더의 ACL 상속이 되돌리고 있는지**부터 의심할 것. 그리고 ACL 명령은 **반드시 `sudo`로 실행**할 것 — 일반 권한으로는 에러 없이 그냥 무시된다.
+
+### 🔴 증상 7: `docker.sock`을 마운트해도 Jenkins가 임의 호스트 경로에 파일을 못 쓴다
+* **관찰:** Jenkins 파이프라인의 `mkdir -p /volume1/docker/monitoring-nas`가 `Permission denied`로 실패했다. Jenkins 컨테이너에는 `/var/run/docker.sock`이 이미 마운트돼 있었는데도 그랬다.
+* **원인:** `docker.sock`은 **도커 데몬을 제어할 권한**(컨테이너 실행/중지, 이미지 관리)이지, **Jenkins 컨테이너 자신의 파일시스템에 임의 호스트 경로를 노출시키는 것과는 무관**하다. Jenkins가 실제로 쓸 수 있는 경로는 `docker-compose.yml`에서 명시적으로 바인드 마운트한 것뿐이다.
+* **해결:** Jenkins용 배포 전용 디렉터리(`/volume1/docker/ci-deploys`)를 만들고, Jenkins의 `docker-compose.yml`에 새 바인드 마운트 줄을 추가한 뒤(`${CI_DEPLOYS_DIR}:${CI_DEPLOYS_DIR}`) 컨테이너를 재생성했다. 기존 마운트(`hyeseongkit`)는 다른 용도로 쓰일 수 있어 건드리지 않고, 새 변수를 추가하는 방식으로 처리했다.
+* **교훈:** "docker.sock이 있으니 뭐든 될 것이다"는 틀린 가정이다. 소켓 권한(컨테이너 제어)과 파일시스템 권한(호스트 경로 쓰기)은 **완전히 별개의 축**이다.
+
+### 🔴 증상 8: Jenkins `withCredentials` 블록 범위 밖에서 크리덴셜이 안 보인다
+* **관찰:** `Deploy` 스테이지(`docker compose up -d`)는 성공했는데, 바로 다음 `Smoke check` 스테이지의 `docker compose ps`가 `required variable ... is missing a value` 에러로 실패했다. 같은 파이프라인, 같은 시크릿인데 한쪽만 실패.
+* **원인:** `withCredentials([...]) { ... }`로 주입한 환경변수는 **그 블록 안에서만 유효**하다. `Smoke check`가 별도의 `sh` 블록(= `withCredentials` 밖)에서 `docker compose ps`를 실행했는데, `ps`조차 compose 파일 전체의 `${VAR}`를 보간(interpolate)하려고 시도하기 때문에 시크릿이 없으면 **조회만 하는 명령도 실패**한다.
+* **해결:** 크리덴셜 바인딩 목록을 Groovy 변수(`composeCredentials`)로 빼서 `Deploy`·`Smoke check` 양쪽이 같은 `withCredentials` 바인딩을 재사용하게 했다.
+
+### 🔴 증상 9: Jenkins 컨테이너 자신의 루프백이 NAS 호스트가 아니다
+* **관찰:** `Smoke check`의 `curl http://127.0.0.1:13090/-/healthy`가 `curl: (7)`(연결 거부)로 실패했다. `docker compose ps`는 4개 컨테이너 모두 `Up`으로 정상 출력됐는데도 그랬다.
+* **원인:** 증상 3과 같은 계열의 실수 — Jenkins는 자기 자신도 별도 컨테이너(`jenkins_default` 브리지 네트워크)다. 파이프라인의 `sh` 스텝 안에서 `127.0.0.1`은 **Jenkins 자신의 루프백**이지 NAS 호스트가 아니다. Prometheus/Loki는 보안 정책상 호스트의 `127.0.0.1`에만 바인딩돼 있어 Jenkins 컨테이너에서는 원리적으로 닿지 않는다.
+* **해결:** Prometheus/Loki가 이미 tailnet IP에도 열려 있으므로(4번 구축 때 개발 PC push 용으로 추가) 그 주소로 확인하도록 스크립트를 고쳤다. 브리지 네트워크의 컨테이너도 호스트의 다른 인터페이스(tailnet)에 바인딩된 서비스에는 정상적으로 닿았다(Grafana→Prometheus 검증 때 이미 확인된 경로와 동일한 원리).
+
+### 🟡 미해결로 남긴 것: `restart.bat` 실행 후 에이전트 프로세스 일시 중복
+* **관찰:** `restart.bat`(→ `shutdown.bat` → `ai-server-start.bat`) 실행 직후 한 번, `wiki_agent.py`·`discord_bot.py`가 정상값(2개)이 아니라 4개씩 떠 있었다 — `shutdown.bat`이 재시작 전의 기존 프로세스를 다 못 죽인 것으로 추정.
+* **처리:** 그 자리에서 잔여 프로세스를 수동으로 정리했다. 이후 같은 절차를 여러 번 반복했지만 재현되지 않았다.
+* **미해결 사유:** 1회성이라 `shutdown.bat`의 `Get-CimInstance` 종료 로직 중 정확히 무엇이 놓쳤는지 확인할 증거를 못 남겼다. 재현되면 그때 `shutdown.bat` 실행 중 프로세스 목록을 남겨서 원인을 특정할 것.
+
+### 🟢 교훈
+* **"컨테이너 안에서 실행되는 것의 `127.0.0.1`은 그 컨테이너 자신이다"**는 이번 조사에서 세 번(증상 3, 9, 그리고 이전 세션의 nas_exporter/Prometheus 문제) 반복됐다. 컨테이너화된 프로세스가 "로컬"에 접속하려는 코드/스크립트를 볼 때마다 **"로컬이 정확히 어느 네임스페이스를 가리키는가"**를 먼저 따질 것.
+* **하나의 환경에서 확인한 사실을 다른 환경에 그대로 적용하지 말 것**(증상 2). Docker Desktop(WSL2)과 네이티브 Linux Docker(Synology)는 같은 `docker inspect` 명령이 통해도 네트워크 동작이 다르고, 같은 스택 안에서도 컨테이너마다 설정이 다를 수 있다(`syslog-format` 지정 여부).
+* **추측으로 방화벽/ACL 범위를 좁히지 말고, raw 소켓/패킷 레벨로 실제 도착지를 먼저 확인할 것**(증상 3, 6). "이 정도면 되겠지"로 좁힌 범위가 실제 도착지와 어긋나면 똑같이 막힌다 — 두 번째 삽질이 첫 번째보다 비용이 크다(이미 하나를 고쳤다는 확신 때문에 다음 실패의 원인을 다른 데서 찾게 된다).
+* **캐시가 있는 시스템의 "죽음"은 겉보기에 감지가 안 된다**(증상 1). 마지막 성공값을 계속 내보내는 캐시는 신뢰성 장치이자 동시에 실패를 감추는 장치다. liveness는 **값의 존재가 아니라 값의 변화**로 확인해야 한다(예: uptime 카운터가 실제로 올라가는지).
+* **PromQL 필터식은 "조건 미충족 = 빈 결과"를 항상 의심할 것**(증상 4). Alertmanager/Grafana 계열은 빈 결과를 대부분 "정상"이 아니라 "알 수 없음(NoData)"으로 취급하고, 기본값은 그걸 알림으로 올린다. `bool` 비교로 항상 값이 나오게 만드는 습관을 들일 것.
+* **권한 문제는 계층이 여럿이다**(증상 6, 7): 파일시스템 마운트 여부, 마운트된 경로 안에서의 소유권, ACL(POSIX 권한 위에 얹힌 별도 레이어), 그리고 그 ACL을 바꿀 권한(root) — 넷 중 하나만 틀려도 "권한 거부"로 뭉뚱그려 보인다. 에러 메시지만으로 어느 계층인지 알 수 없으므로 하나씩 확인해야 한다.
+
 
