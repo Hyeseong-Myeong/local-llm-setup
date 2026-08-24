@@ -16,6 +16,18 @@ services:
       # 기존 동작(전 인터페이스)을 유지한다. 특정 인터페이스로 좁히려면
       # .env 에 OPEN_WEBUI_BIND_IP 를 지정한다 (bifrost 와 같은 방식).
       - "${OPEN_WEBUI_BIND_IP:-0.0.0.0}:3000:8080"
+    logging:
+      # syslog 드라이버 -> 개발 PC Alloy (설계 4-2). dual-logging 이라 `docker logs` 는
+      # 그대로 유지된다. 로컬 유닉스 syslog 포맷이 기본값이다(syslog-format 미지정).
+      # host.docker.internal 이어야 한다 — Docker Desktop 이 dockerd 를 WSL2 VM
+      # 안에서 돌리므로 127.0.0.1 은 그 VM 자신의 루프백이라 Windows 호스트에
+      # 닿지 않는다(monitoring/devpc/config.alloy 참조, 실측 확인).
+      driver: syslog
+      options:
+        syslog-address: "udp://host.docker.internal:51400"
+        tag: "{{.Name}}"
+        mode: "non-blocking"
+        max-buffer-size: "4m"
     volumes:
       # docker run 시절부터 쓰던 볼륨을 그대로 재사용한다. 대화 기록이 여기 있다.
       - open-webui:/app/backend/data

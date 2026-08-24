@@ -1,7 +1,26 @@
 import atexit
 import datetime
 import os
+import re
 import sys
+
+# 1차 방어(Docs/plg_monitoring_design.md 12-3) — 로그 파일에 쓰기 전에 치환한다.
+# Alloy 쪽 2차 방어(monitoring/*/config.alloy 의 loki.process "redact")와 같은
+# 패턴을 쓴다 — 한 곳에서 관리하고 양쪽에 반영한다.
+_REDACT_PATTERNS = [
+    (re.compile(r'(?i)(api[_-]?key\s*[=:]\s*)\S+'), r'\1<REDACTED>'),
+    (re.compile(r'(?i)(bearer\s+)[A-Za-z0-9._\-]{8,}'), r'\1<REDACTED>'),
+    (re.compile(r'(?i)(authorization\s*[=:]\s*)\S+'), r'\1<REDACTED>'),
+    (re.compile(r'(?i)(token\s*[=:]\s*)\S+'), r'\1<REDACTED>'),
+    (re.compile(r'(?i)(webhook[s]?/)[A-Za-z0-9._\-/]+'), r'\1<REDACTED>'),
+    (re.compile(r'sk-[A-Za-z0-9]{16,}'), '<REDACTED>'),
+]
+
+
+def _redact(text):
+    for pattern, replacement in _REDACT_PATTERNS:
+        text = pattern.sub(replacement, text)
+    return text
 
 
 def setup_logger(log_filename):
@@ -11,15 +30,13 @@ def setup_logger(log_filename):
     """
     log_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'logs')
     os.makedirs(log_dir, exist_ok=True)
-    log_path = os.path.join(log_dir, log_filename)
 
-    # 로그 로테이션: 10MB 초과 시 이전 로그 삭제 후 현재 로그를 백업
-    max_log_size = 10 * 1024 * 1024  # 10MB
-    if os.path.exists(log_path) and os.path.getsize(log_path) > max_log_size:
-        bak_path = log_path + '.bak'
-        if os.path.exists(bak_path):
-            os.remove(bak_path)
-        os.rename(log_path, bak_path)
+    # 날짜 기반 파일명(4-1) — 같은 이름으로 재생성하면 Alloy 의 Windows 로테이션
+    # 결함(grafana/alloy#2292)에 걸려 수집이 통째로 멈춘다. 날이 바뀌면 새 경로가
+    # 생기므로 이 문제가 없다. 크기 기반 회전(.bak)은 더 이상 필요 없어 제거했다.
+    base, ext = os.path.splitext(log_filename)
+    dated_filename = f"{base}-{datetime.datetime.now().strftime('%Y%m%d')}{ext}"
+    log_path = os.path.join(log_dir, dated_filename)
 
     # 파일을 append 모드로 열고 라인 버퍼링(buffering=1) 적용
     log_file = open(log_path, 'a', encoding='utf-8', buffering=1)
@@ -31,6 +48,7 @@ def setup_logger(log_filename):
             self.terminal = terminal
 
         def write(self, data):
+            data = _redact(data)
             self.file.write(data)
             # terminal 객체가 None이 아니고 쓰기 가능하면 출력 (pythonw에서는 오류 방지)
             if self.terminal:

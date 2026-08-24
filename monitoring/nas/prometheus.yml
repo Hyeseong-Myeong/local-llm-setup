@@ -1,0 +1,36 @@
+# 구축 순서 3번 (Docs/plg_monitoring_design.md 10장).
+#
+# 이 Prometheus 컨테이너는 network_mode: host 로 띄운다 — 일반 이유가 아니다.
+# nas_exporter.py 는 컨테이너가 아니라 "호스트" 프로세스로 돌고 127.0.0.1 에만
+# 바인딩한다(12-2, K10). 일반 브리지 네트워크의 컨테이너는 호스트의 127.0.0.1 을
+# 볼 수 없다 — host.docker.internal 을 거쳐도 목적지 IP 가 127.0.0.1 이 아니라
+# 브리지 게이트웨이 IP 로 바뀌므로, 루프백 전용으로 바인딩된 소켓은 그 연결을
+# 받지 않는다. 이 문제를 우회하는 표준적인 방법이 Prometheus 를 호스트 네트워크에
+# 두는 것이다 — 그러면 Prometheus 의 "127.0.0.1" 이 곧 호스트의 127.0.0.1 이 된다.
+#
+# 대가: host 네트워크에서는 docker-compose 의 서비스 이름 DNS(예: loki:3100)를
+# 못 쓴다. 이 설정엔 그런 대상이 없어서 문제되지 않는다.
+#
+# 🔴 Grafana 가 이 Prometheus 를 데이터소스로 물려면(8번 대시보드 구축 시) 같은
+# 문제가 반대 방향으로 생긴다 — 그때 다시 판단한다. 지금은 3번의 완료 기준
+# (chroma_bound_all_interfaces 가 값을 냄)만 충족하면 된다.
+#
+# 4번(개발 PC exporter + Alloy push)에서 --web.listen-address 를 tailnet IP 에도
+# 추가하고 --web.enable-remote-write-receiver 를 켰다(docker-compose.yml 참조).
+# ✅ 검증 완료(2026-08-23): 이 listen-address 확장으로 8번의 Grafana 접근 문제도
+# 같이 풀렸다 — `docker exec grafana wget -qO- http://<TAILNET_BIND_IP>:13090/-/healthy`
+# 가 브리지 네트워크의 Grafana 에서 성공한다. 8번에서 datasource URL 을
+# http://<TAILNET_BIND_IP>:13090 으로 잡으면 된다 — network_mode: host 우회용 별도
+# 작업 불필요.
+
+global:
+  scrape_interval: 30s
+
+scrape_configs:
+  - job_name: nas_exporter
+    static_configs:
+      - targets: ["127.0.0.1:13091"]
+
+  - job_name: alloy_nas
+    static_configs:
+      - targets: ["127.0.0.1:12345"]

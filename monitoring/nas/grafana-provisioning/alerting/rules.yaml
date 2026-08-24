@@ -1,0 +1,318 @@
+# 알림 규칙 (설계 9-1). 라벨 severity 로 notification-policies.yaml 이 채널을 가른다.
+#
+# 🔴 disclosure: 표(9-1)에서 "log_file_bytes ... 일간" 두 개는 색은 🟡(warning)인데
+# 주기는 "일간"이라 severity=warning 정책(4시간 반복)과 맞지 않는다 — severity 는
+# info 로 매겨 "일간 요약" 채널(9-2)로 보냈다. 나머지는 표 그대로다.
+apiVersion: 1
+
+groups:
+  - orgId: 1
+    name: plg-critical-immediate
+    folder: PLG Monitoring
+    interval: 1m
+    rules:
+      - uid: plg-chroma-bound-all
+        title: "chromadb bound to all interfaces"
+        condition: C
+        for: 0s
+        labels:
+          severity: critical
+        annotations:
+          summary: "chromadb 가 0.0.0.0/전체 인터페이스에 바인딩된 상태로 돌아갔다 (섹션 16 발견 4)"
+        data:
+          # 🔴 실측으로 잡은 버그: 설계 문서 9-1 표의 이름(chroma_bound_all_interfaces)을
+          # 그대로 썼는데, nas_exporter.py 가 실제로 내는 이름은
+          # container_bound_all_interfaces{container="chromadb"} 다 — 존재하지
+          # 않는 메트릭을 쿼리해서 매번 DatasourceNoData 로 잘못 발동했다.
+          - refId: A
+            datasourceUid: prometheus-nas
+            relativeTimeRange: { from: 600, to: 0 }
+            model:
+              expr: container_bound_all_interfaces{container="chromadb"}
+              instant: true
+              refId: A
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator: { type: gt, params: [0.5] }
+              refId: C
+
+      - uid: plg-chroma-wrong-responder
+        title: "chromadb port answered by a different container"
+        condition: C
+        for: 0s
+        noDataState: OK
+        labels:
+          severity: critical
+        annotations:
+          summary: "8000 번을 chromadb 가 아닌 다른 컨테이너가 응답 중이다 (docker rename 잔존 사고 패턴)"
+        data:
+          # 🔴 실측으로 잡은 버그: `and` 필터는 조건이 거짓(=정상)이면 빈 벡터를
+          # 낸다. Grafana 는 빈 결과를 기본적으로 "정상"이 아니라 "NoData(=알림)"
+          # 로 취급해서, 정상일 때마다 매번 잘못 발동했다. `== bool` 비교로
+          # 바꿔서 항상 0/1 값이 실제로 존재하게 만들고, noDataState 도 OK 로
+          # 명시해 이중으로 막는다 — 전체 부재(NAS exporter 자체가 죽음)는
+          # 이 규칙의 책임이 아니다.
+          - refId: A
+            datasourceUid: prometheus-nas
+            relativeTimeRange: { from: 600, to: 0 }
+            model:
+              expr: (chroma_responding_container == bool 0) * (chroma_http_up == bool 1)
+              instant: true
+              refId: A
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator: { type: gt, params: [0.5] }
+              refId: C
+
+      - uid: plg-bifrost-timeout-misconfig
+        title: "Bifrost request timeout misconfigured"
+        condition: C
+        for: 0s
+        noDataState: OK  # 어떤 프로바이더도 timeout 설정을 안 쓴 상태는 정상이다 - 알릴 일이 아니다
+        labels:
+          severity: critical
+        annotations:
+          summary: "bifrost_request_timeout_seconds 가 60 초 미만이다 (실측 사고: 600 -> 6 오입력)"
+        data:
+          - refId: A
+            datasourceUid: prometheus-nas
+            relativeTimeRange: { from: 600, to: 0 }
+            model:
+              expr: bifrost_request_timeout_seconds
+              instant: true
+              refId: A
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator: { type: lt, params: [60] }
+              refId: C
+
+      - uid: plg-devpc-no-data
+        title: "Dev PC metrics stopped arriving"
+        condition: C
+        for: 10m
+        noDataState: Alerting
+        execErrState: Alerting
+        labels:
+          severity: critical
+        annotations:
+          summary: "개발 PC -> Alloy -> remote-write 경로가 끊겼거나 local_exporter 가 죽었다 (push 방식이라 부재로만 감지된다, 6-1)"
+        data:
+          - refId: A
+            datasourceUid: prometheus-nas
+            relativeTimeRange: { from: 600, to: 0 }
+            model:
+              expr: up{job="prometheus.scrape.local_exporter"}
+              instant: true
+              refId: A
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator: { type: lt, params: [1] }
+              refId: C
+
+  - orgId: 1
+    name: plg-warning-5m
+    folder: PLG Monitoring
+    interval: 1m
+    rules:
+      - uid: plg-ollama-gpu-ratio
+        title: "Ollama model running partially on CPU"
+        condition: C
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "ollama_model_gpu_ratio 가 1.0 미만이다 - 추론이 조용히 몇 배 느려진 상태일 수 있다"
+        data:
+          - refId: A
+            datasourceUid: prometheus-nas
+            relativeTimeRange: { from: 600, to: 0 }
+            model:
+              expr: ollama_model_gpu_ratio
+              instant: true
+              refId: A
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator: { type: lt, params: [1.0] }
+              refId: C
+
+      - uid: plg-ollama-orphan-runners
+        title: "Orphaned llama-server runner holding VRAM"
+        condition: C
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "ollama_orphan_runners > 0 - 고아 러너가 VRAM 을 점유하고 있다"
+        data:
+          - refId: A
+            datasourceUid: prometheus-nas
+            relativeTimeRange: { from: 600, to: 0 }
+            model:
+              expr: ollama_orphan_runners
+              instant: true
+              refId: A
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator: { type: gt, params: [0] }
+              refId: C
+
+      - uid: plg-agent-process-count
+        title: "Agent process count is not 2"
+        condition: C
+        for: 5m
+        noDataState: OK
+        labels:
+          severity: warning
+        annotations:
+          summary: "agent_process_count 가 2 가 아니다 - 사망(0) 또는 중복 기동(4 이상)"
+        data:
+          # 정상(=2)일 때 "!= 2" 필터는 빈 벡터를 낸다 -> Grafana 기본값이 그걸
+          # NoData=알림으로 취급해 매번 잘못 발동했다(실측). `!= bool` 로 바꿔
+          # 항상 0/1 이 존재하게 한다.
+          - refId: A
+            datasourceUid: prometheus-nas
+            relativeTimeRange: { from: 600, to: 0 }
+            model:
+              expr: agent_process_count != bool 2
+              instant: true
+              refId: A
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator: { type: gt, params: [0.5] }
+              refId: C
+
+      - uid: plg-wiki-docs-drop
+        title: "Wiki collection document count dropped sharply"
+        condition: C
+        for: 1m
+        noDataState: OK
+        labels:
+          severity: warning
+        annotations:
+          summary: "wiki_collection_documents 가 15분 전 대비 20% 넘게 줄었다 - 재임베딩/삭제 사고 의심 (임계값은 설계 문서에 수치가 없어 직접 정함)"
+        data:
+          # 급감이 없을 때(=정상) 이 필터도 빈 벡터를 낸다 -> 같은 이유로 `< bool`
+          # 로 바꿔 항상 값이 존재하게 한다.
+          - refId: A
+            datasourceUid: prometheus-nas
+            relativeTimeRange: { from: 600, to: 0 }
+            model:
+              expr: wiki_collection_documents < bool ((wiki_collection_documents offset 15m) * 0.8)
+              instant: true
+              refId: A
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator: { type: gt, params: [0.5] }
+              refId: C
+
+  - orgId: 1
+    name: plg-info-daily
+    folder: PLG Monitoring
+    interval: 10m
+    rules:
+      - uid: plg-chroma-old-container
+        title: "Old chromadb container still exists"
+        condition: C
+        for: 0s
+        labels:
+          severity: info
+        annotations:
+          summary: "chromadb_old 컨테이너가 여전히 남아있다 - 지뢰가 치워지지 않았다"
+        data:
+          - refId: A
+            datasourceUid: prometheus-nas
+            relativeTimeRange: { from: 1800, to: 0 }
+            model:
+              expr: chroma_old_container_exists
+              instant: true
+              refId: A
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator: { type: gt, params: [0.5] }
+              refId: C
+
+      - uid: plg-ollama-log-size
+        title: "Ollama log file growing without rotation"
+        condition: C
+        for: 0s
+        labels:
+          severity: info
+        annotations:
+          summary: "ollama 로그 파일이 2GB 를 넘었다 - 로테이션이 없어 계속 커진다(6-4)"
+        data:
+          - refId: A
+            datasourceUid: prometheus-nas
+            relativeTimeRange: { from: 1800, to: 0 }
+            model:
+              expr: log_file_bytes{name=~"ollama-.*"}
+              instant: true
+              refId: A
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator: { type: gt, params: [2000000000] }
+              refId: C
+
+      - uid: plg-app-log-size
+        title: "App log approaching rotation size"
+        condition: C
+        for: 0s
+        labels:
+          severity: info
+        annotations:
+          summary: "앱 로그(log_file_bytes)가 40MB 를 넘었다 - 로테이션(50MB) 근접, 유실 임박(4-1)"
+        data:
+          - refId: A
+            datasourceUid: prometheus-nas
+            relativeTimeRange: { from: 1800, to: 0 }
+            model:
+              expr: log_file_bytes{name=~"wiki_agent|discord_bot|fastapi_wiki_server"}
+              instant: true
+              refId: A
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator: { type: gt, params: [40000000] }
+              refId: C
