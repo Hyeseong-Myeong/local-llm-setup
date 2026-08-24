@@ -1,0 +1,31 @@
+# Discord 연락처 3개 — 심각도별로 채널을 분리한다(9-2: 하나로 몰면 소음에
+# 크리티컬이 묻힌다). 웹훅 URL은 .env 로만 주입한다(커밋 안 함).
+apiVersion: 1
+
+contactPoints:
+  - orgId: 1
+    name: discord-info
+    receivers:
+      - uid: discord-info-1
+        type: discord
+        settings:
+          url: $DISCORD_WEBHOOK_URL_INFO
+          use_discord_username: true
+
+  - orgId: 1
+    name: discord-warning
+    receivers:
+      - uid: discord-warning-1
+        type: discord
+        settings:
+          url: $DISCORD_WEBHOOK_URL_WARNING
+          use_discord_username: true
+
+  - orgId: 1
+    name: discord-critical
+    receivers:
+      - uid: discord-critical-1
+        type: discord
+        settings:
+          url: $DISCORD_WEBHOOK_URL_ERROR
+          use_discord_username: true
