@@ -1,0 +1,119 @@
+# NAS 에 Loki + Grafana 를 배포한다 (구축 순서 1번, Docs/plg_monitoring_design.md 10장).
+#
+# 🔴🔴🔴 배포는 Jenkins 파이프라인(monitoring/nas/Jenkinsfile)을 통해서만 한다.
+# NAS 배포 디렉터리(/volume1/docker/monitoring-nas)에는 .env 파일이 없다 — 모든
+# 값(GF_SECURITY_*, TAILNET_BIND_IP, DISCORD_WEBHOOK_URL_*)을 Jenkins Credentials
+# 에서 주입한다. 그래서 여기서 사람이 직접 `docker compose up -d` 를 돌리면
+# ":?" 가드가 걸려 반드시 실패한다 — 헷갈려서 수동으로 시도하면 이 에러를 본다.
+# 그건 고장이 아니라 의도된 안전장치다. 값을 바꾸려면:
+#   Jenkins > Manage Jenkins > Credentials 에서 해당 항목 수정 -> Build Now
+#
+# (.env.example 은 각 값이 무엇을 뜻하는지 참고용으로만 남겨둔다 — 실제로
+# 이 파일에서 .env 를 만들어 쓰지 않는다.)
+#
+# 바인딩 정책 (8-2, K10):
+#   - Grafana(13000) 는 tailnet 인터페이스에 연다. 조회·알림 UI 라서 다른 기기에서 봐야 한다.
+#   - Loki(13100) · Prometheus(13090) 는 루프백 + tailnet 둘 다 연다. NAS 안의
+#     Alloy(루프백)와 개발 PC Alloy(tailnet, 5번·6-1)가 각각 쓴다.
+#   - ":?" 가드는 값이 비면 compose 를 에러로 멈춘다 — 값이 비어 "0.0.0.0" 으로
+#     조용히 열리는 사고를 막는다(섹션 16 N10, troubleshooting.md 653행과 동일한 이유).
+#
+# name 을 명시로 고정한다 — 지금 실제 배포 디렉터리 이름(nas)에서 나온 볼륨
+# (nas_prometheus-data 등)과 항상 같은 이름으로 묶이게 하기 위해서다. 이걸
+# 안 박으면 나중에 배포 경로/디렉터리명이 바뀔 때(예: Jenkins 파이프라인 도입)
+# compose 가 새 프로젝트 이름으로 보고 빈 볼륨을 새로 만든다 — 기존 데이터가
+# 안 지워지고 그냥 안 보이게만 되는, 알아채기 어려운 사고다.
+name: nas
+services:
+  loki:
+    image: grafana/loki:latest
+    container_name: loki
+    ports:
+      - "127.0.0.1:13100:3100"
+      # 개발 PC Alloy 가 tailnet 으로 로그를 push 한다(5번, 6-1) — Prometheus 와
+      # 같은 이유로 tailnet 바인딩을 추가한다. NAS 안의 Alloy 는 여전히 루프백을 쓴다.
+      - "${TAILNET_BIND_IP:?TAILNET_BIND_IP is empty - refusing to bind 0.0.0.0}:13100:3100"
+    volumes:
+      - ./loki-config.yaml:/etc/loki/local-config.yaml:ro
+      - loki-data:/loki
+    command: -config.file=/etc/loki/local-config.yaml
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    ports:
+      - "127.0.0.1:13000:3000"
+      - "${TAILNET_BIND_IP:?TAILNET_BIND_IP is empty - refusing to bind 0.0.0.0}:13000:3000"
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./grafana-provisioning:/etc/grafana/provisioning:ro
+    environment:
+      # 8-3 의 로그인 정책 6개 항목 중 이 스택에서 정할 수 있는 것들.
+      # admin 비밀번호·세션 키는 값이 비면 기본값(admin/admin, 위조 가능한 세션)으로
+      # 조용히 뜨는 것을 막기 위해 ":?" 가드를 건다.
+      - GF_SECURITY_ADMIN_PASSWORD=${GF_SECURITY_ADMIN_PASSWORD:?GF_SECURITY_ADMIN_PASSWORD is empty}
+      - GF_SECURITY_SECRET_KEY=${GF_SECURITY_SECRET_KEY:?GF_SECURITY_SECRET_KEY is empty}
+      - GF_AUTH_ANONYMOUS_ENABLED=false
+      - GF_USERS_ALLOW_SIGN_UP=false
+      # tailnet(WireGuard) 자체가 암호화되므로 HTTPS 가 아니어도 쿠키를 평문 HTTP 로 둔다.
+      # true 로 두면 HTTPS 가 아닌 이 배포에서 로그인이 막힌다(8-3 항목 5).
+      - GF_SECURITY_COOKIE_SECURE=false
+      # Discord 웹훅 3종 (9장) — grafana-provisioning/alerting/contact-points.yaml 이
+      # $DISCORD_WEBHOOK_URL_* 형태로 참조한다(Grafana 프로비저닝의 환경변수 치환).
+      # 비어 있으면 알림이 조용히 안 가는 상태로 뜨는 대신 여기서 바로 막는다.
+      - DISCORD_WEBHOOK_URL_INFO=${DISCORD_WEBHOOK_URL_INFO:?DISCORD_WEBHOOK_URL_INFO is empty}
+      - DISCORD_WEBHOOK_URL_WARNING=${DISCORD_WEBHOOK_URL_WARNING:?DISCORD_WEBHOOK_URL_WARNING is empty}
+      - DISCORD_WEBHOOK_URL_ERROR=${DISCORD_WEBHOOK_URL_ERROR:?DISCORD_WEBHOOK_URL_ERROR is empty}
+      # grafana-provisioning/datasources/prometheus.yaml 이 $TAILNET_BIND_IP 로
+      # Prometheus 를 가리킨다(같은 값을 위에서 이미 포트 바인딩에 쓰고 있다).
+      - TAILNET_BIND_IP=${TAILNET_BIND_IP}
+    depends_on:
+      - loki
+    restart: unless-stopped
+
+  alloy:
+    image: grafana/alloy:latest
+    container_name: alloy
+    ports:
+      # syslog 수신기 — 같은 호스트의 dockerd 만 보낸다 (4-2, K2).
+      - "127.0.0.1:51400:51400/udp"
+      # Alloy 자신의 파이프라인 메트릭. Prometheus(호스트 네트워크)가 긁을 수 있도록
+      # 루프백에 연다 — 아래 prometheus 서비스 주석 참조.
+      - "127.0.0.1:12345:12345"
+    volumes:
+      - ./config.alloy:/etc/alloy/config.alloy:ro
+      - alloy-data:/var/lib/alloy/data
+    command: run --server.http.listen-addr=0.0.0.0:12345 --storage.path=/var/lib/alloy/data /etc/alloy/config.alloy
+    depends_on:
+      - loki
+    restart: unless-stopped
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus
+    # network_mode: host — nas_exporter.py 는 컨테이너가 아니라 호스트 프로세스로
+    # 127.0.0.1:13091 에만 바인딩한다(12-2). 일반 브리지 네트워크에서는 호스트의
+    # 127.0.0.1 에 도달할 수 없으므로(목적지 IP 가 게이트웨이로 바뀐다), Prometheus
+    # 를 호스트 네트워크에 둔다 — 자세한 이유는 prometheus.yml 상단 주석 참조.
+    # 대가: ports: 매핑이 무의미해진다 — 노출 범위는 --web.listen-address 로만 정한다.
+    network_mode: host
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=90d
+      - --web.listen-address=127.0.0.1:13090
+      # 개발 PC Alloy 가 tailnet 으로 remote-write 를 push 한다(6-1) — --web.listen-address
+      # 는 반복 가능한 플래그라(prom/prometheus --help 확인) 루프백은 유지한 채 이것만 더한다.
+      - --web.listen-address=${TAILNET_BIND_IP:?TAILNET_BIND_IP is empty - refusing to bind 0.0.0.0}:13090
+      - --web.enable-remote-write-receiver
+    restart: unless-stopped
+
+volumes:
+  loki-data:
+  grafana-data:
+  alloy-data:
+  prometheus-data:
