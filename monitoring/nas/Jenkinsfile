@@ -1,0 +1,78 @@
+// NAS 모니터링 스택(Loki/Grafana/Prometheus/Alloy) 배포 파이프라인.
+// 수동 트리거(Build Now)만 쓴다 — 자주 안 바뀌는 인프라라 자동 트리거는 과하다.
+//
+// 🔴 배포는 이제 이 파이프라인이 유일한 경로다. NAS 배포 디렉터리에 .env 파일이
+// 없다 — 모든 값을 Jenkins Credentials 에서 주입한다. 그래서 NAS 에서 사람이
+// 직접 `docker compose up -d` 를 돌리면 반드시 실패한다(":?" 가드가 값 없음을
+// 잡는다) — 고장이 아니라 의도된 동작이다. 값을 바꾸려면 Jenkins Credentials 를
+// 고치고 다시 Build 한다.
+//
+// 전제:
+//   - Jenkins 컨테이너에 /var/run/docker.sock 이 마운트돼 있고 docker/git CLI 가 있다(확인됨).
+//   - docker-compose.yml 에 `name: nas` 가 박혀 있어 DEPLOY_DIR 경로가 바뀌어도
+//     기존 볼륨(nas_prometheus-data 등)에 계속 붙는다.
+//   - 아래 6개가 Jenkins Credentials(Secret text)로 등록돼 있어야 한다
+//     (Manage Jenkins -> Credentials -> System -> Global credentials -> Add Credentials):
+//       discord-webhook-info      -> DISCORD_WEBHOOK_URL_INFO
+//       discord-webhook-warning   -> DISCORD_WEBHOOK_URL_WARNING
+//       discord-webhook-error     -> DISCORD_WEBHOOK_URL_ERROR
+//       grafana-admin-password    -> GF_SECURITY_ADMIN_PASSWORD
+//       grafana-secret-key        -> GF_SECURITY_SECRET_KEY
+//       nas-tailnet-ip            -> TAILNET_BIND_IP
+
+pipeline {
+    agent any
+
+    environment {
+        DEPLOY_DIR = "/volume1/docker/monitoring-nas"
+    }
+
+    stages {
+        stage('Checkout') {
+            steps {
+                checkout scm
+            }
+        }
+
+        stage('Sync files') {
+            steps {
+                // .env 를 애초에 안 쓰므로 여기서 건드릴 것도 없다 — 워크스페이스
+                // 내용을 그대로 덮어쓰기만 한다(--delete 없음, 실수로 뭔가 지우지 않도록).
+                sh '''
+                    mkdir -p "${DEPLOY_DIR}"
+                    cp -r monitoring/nas/. "${DEPLOY_DIR}/"
+                '''
+            }
+        }
+
+        stage('Deploy') {
+            steps {
+                withCredentials([
+                    string(credentialsId: 'discord-webhook-info', variable: 'DISCORD_WEBHOOK_URL_INFO'),
+                    string(credentialsId: 'discord-webhook-warning', variable: 'DISCORD_WEBHOOK_URL_WARNING'),
+                    string(credentialsId: 'discord-webhook-error', variable: 'DISCORD_WEBHOOK_URL_ERROR'),
+                    string(credentialsId: 'grafana-admin-password', variable: 'GF_SECURITY_ADMIN_PASSWORD'),
+                    string(credentialsId: 'grafana-secret-key', variable: 'GF_SECURITY_SECRET_KEY'),
+                    string(credentialsId: 'nas-tailnet-ip', variable: 'TAILNET_BIND_IP')
+                ]) {
+                    sh '''
+                        cd "${DEPLOY_DIR}"
+                        docker compose up -d
+                    '''
+                }
+            }
+        }
+
+        stage('Smoke check') {
+            steps {
+                sh '''
+                    sleep 5
+                    cd "${DEPLOY_DIR}"
+                    docker compose ps
+                    curl -sf http://127.0.0.1:13090/-/healthy && echo " - prometheus OK"
+                    curl -sf http://127.0.0.1:13100/ready && echo " - loki OK"
+                '''
+            }
+        }
+    }
+}

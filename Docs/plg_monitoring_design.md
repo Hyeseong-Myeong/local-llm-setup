@@ -711,6 +711,14 @@ $Tasks = @(
 | 7 | 알림 규칙 + Discord 연결 | **의도적으로 조건을 만들어 실제로 울리는지 확인** |
 | 8 | 대시보드 구성 | |
 
+> 🔴 **7번부터 NAS 배포 방식이 바뀌었다 — Jenkins 파이프라인 전용이다.**
+> `monitoring/nas/`에 사람이 직접 `docker compose up -d` 하던 방식(1~6번)은
+> 더 이상 쓰지 않는다. NAS 배포 디렉터리(`/volume1/docker/monitoring-nas`)에는
+> `.env` 파일이 없다 — `GF_SECURITY_*` · `TAILNET_BIND_IP` · `DISCORD_WEBHOOK_URL_*`
+> 전부 Jenkins Credentials 에서 주입된다(`monitoring/nas/Jenkinsfile`). 수동으로
+> `docker compose up -d` 를 돌리면 `:?` 가드에 막혀 반드시 실패한다 — 고장이
+> 아니라 의도된 것이다. 배포·값 변경은 항상 **Jenkins job 의 Build Now** 로 한다.
+
 > **7번을 형식적으로 넘기지 말 것.** 알림은 **울려야 할 때 울리는지 확인하기 전까지 작동한다고 말할 수 없다.** 이번 조사 전체가 "확인했다고 믿었으나 아니었던" 사례의 연속이었다.
 
 ---
