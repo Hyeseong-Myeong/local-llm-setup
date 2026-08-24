@@ -1,7 +1,7 @@
 # NAS 에 Loki + Grafana 를 배포한다 (구축 순서 1번, Docs/plg_monitoring_design.md 10장).
 #
 # 🔴🔴🔴 배포는 Jenkins 파이프라인(monitoring/nas/Jenkinsfile)을 통해서만 한다.
-# NAS 배포 디렉터리(/volume1/docker/monitoring-nas)에는 .env 파일이 없다 — 모든
+# NAS 배포 디렉터리(/volume1/docker/ci-deploys/monitoring-nas)에는 .env 파일이 없다 — 모든
 # 값(GF_SECURITY_*, TAILNET_BIND_IP, DISCORD_WEBHOOK_URL_*)을 Jenkins Credentials
 # 에서 주입한다. 그래서 여기서 사람이 직접 `docker compose up -d` 를 돌리면
 # ":?" 가드가 걸려 반드시 실패한다 — 헷갈려서 수동으로 시도하면 이 에러를 본다.
