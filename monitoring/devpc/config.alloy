@@ -1,0 +1,141 @@
+// 개발 PC → NAS 메트릭 push (구축 순서 4번, Docs/plg_monitoring_design.md 6-1).
+// exporter/local_exporter.py 는 127.0.0.1:13092 에만 바인딩한다 — 여기서만 긁는다.
+// NAS 는 tailnet 으로 pull 하지 않는다(6-1). 이 Alloy 가 대신 remote-write 로 민다.
+//
+// 실행: monitoring/devpc/start-alloy.bat (NAS_TAILNET_IP 는 monitoring/devpc/.env — 커밋 안 함).
+// 로그(앱 로그 tail·syslog 수신기)는 Loki 로, 메트릭은 위처럼 remote-write 로 보낸다(6-1).
+
+prometheus.scrape "local_exporter" {
+  targets         = [{"__address__" = "127.0.0.1:13092"}]
+  scrape_interval = "30s"
+  forward_to      = [prometheus.remote_write.nas.receiver]
+}
+
+// Alloy 자신의 파이프라인 메트릭 — NAS 쪽(alloy_nas)과 같은 이유로 같이 보낸다.
+prometheus.scrape "alloy_self" {
+  targets         = [{"__address__" = "127.0.0.1:12345"}]
+  scrape_interval = "60s"
+  forward_to      = [prometheus.remote_write.nas.receiver]
+}
+
+// Bifrost 네이티브 /metrics (6-3). 화이트리스트가 아니라 인증을 유지하기로
+// 결정했으므로 basic_auth 가 필요하다 — 자격증명은 governance_config 테이블에
+// 이미 있고(Web UI 에서 설정), 값은 .env 로만 주입한다(커밋 안 함).
+prometheus.scrape "bifrost" {
+  targets         = [{"__address__" = "127.0.0.1:18080"}]
+  scrape_interval = "30s"
+  forward_to      = [prometheus.remote_write.nas.receiver]
+
+  basic_auth {
+    username = sys.env("BIFROST_ADMIN_USER")
+    password = sys.env("BIFROST_ADMIN_PASSWORD")
+  }
+}
+
+prometheus.remote_write "nas" {
+  endpoint {
+    url = "http://" + sys.env("NAS_TAILNET_IP") + ":13090/api/v1/write"
+  }
+}
+
+// --- 로그 (구축 순서 5번) ---
+
+// 앱 로그 3종 — 날짜 기반 파일명(4-1, src/logger_setup.py). 글롭이라 날이 바뀌어
+// 새 파일이 생겨도 자동으로 따라간다 — Alloy 의 Windows 로테이션 결함(alloy#2292)은
+// "같은 이름으로 재생성"에만 걸리므로 이 경로는 해당 없다.
+local.file_match "app_logs" {
+  path_targets = [
+    {"__path__" = "C:\\local_LLM\\logs\\wiki_agent-*.log", "app" = "wiki_agent"},
+    {"__path__" = "C:\\local_LLM\\logs\\discord_bot-*.log", "app" = "discord_bot"},
+    {"__path__" = "C:\\local_LLM\\logs\\fastapi_wiki_server-*.log", "app" = "fastapi_wiki_server"},
+    // Ollama (6-4) — 날짜가 아니라 재기동 시각(STAMP)으로 파일명이 갈린다.
+    // 같은 이유(alloy#2292)로 매 재기동마다 새 이름이 필요해서다.
+    // 🔴 "*.log" 는 "*.err.log" 도 매칭한다 — stdout 글롭은 타임스탬프가 숫자로
+    // 끝나는 "*[0-9].log" 로 좁혀 err 파일과 안 겹치게 한다(두 번 수집 방지).
+    {"__path__" = "C:\\local_LLM\\logs\\ollama-*[0-9].log", "app" = "ollama", "stream" = "stdout"},
+    {"__path__" = "C:\\local_LLM\\logs\\ollama-*.err.log", "app" = "ollama", "stream" = "stderr"},
+  ]
+}
+
+loki.source.file "app_logs" {
+  targets    = local.file_match.app_logs.targets
+  forward_to = [loki.process.redact.receiver]
+}
+
+// 컨테이너가 logging.tag="{{.Name}}" 으로 보낸 이름이 RFC5424 APP-NAME 필드로 들어온다.
+// NAS 쪽 config.alloy 와 같은 패턴 — container 라벨로 승격한다.
+loki.relabel "syslog_container" {
+  forward_to = []
+
+  rule {
+    source_labels = ["__syslog_message_app_name"]
+    target_label  = "container"
+  }
+}
+
+// bifrost · open-webui 컨테이너의 syslog 드라이버 수신 (4-2).
+// 🔴 Windows 전용 문제 — Docker Desktop 은 dockerd 를 WSL2 VM 안에서 돌린다.
+// syslog-address 에 그냥 127.0.0.1 을 쓰면 그건 VM 자신의 루프백이라 Windows
+// 호스트에 닿지 않는다 — 반드시 host.docker.internal 이어야 한다(각 컨테이너의
+// docker-compose.yml 참조). Docker Desktop 의 프록시가 이걸 다시 Windows 의
+// 127.0.0.1 로 릴레이한다(raw 소켓으로 실측: 패킷이 127.0.0.1 에서 도착한다) —
+// 그래서 이 리스너는 루프백 그대로 두면 된다(K10 의도와 동일).
+// 🔴 남는 함정 — 방화벽. Windows 는 이 릴레이된 패킷도 인바운드 규칙 없이는
+// 막는다(vEthernet(WSL) 이 Public 프로파일 취급을 받는 것과는 별개 문제 —
+// alloy.exe 에 inbound 허용이 아예 없었던 것뿐이다). 관리자 권한으로 1회:
+// New-NetFirewallRule -DisplayName "LocalLLM-Alloy-Syslog" -Direction Inbound
+//   -Protocol UDP -LocalPort 51400 -RemoteAddress 127.0.0.1
+//   -Program "C:\GrafanaAlloy\alloy.exe" -Action Allow -Profile Any
+loki.source.syslog "docker" {
+  listener {
+    address                = "127.0.0.1:51400"
+    protocol                = "udp"
+    // syslog-format 을 지정하지 않은 Docker 의 실제 기본 전송 포맷은 RFC5424 가
+    // 아니라 RFC3164 다 — raw 소켓으로 실측(`<30>Aug 23 07:06:25 bifrost[149]: ...`,
+    // 버전 필드·ISO8601 타임스탬프 없음). rfc5424 로 두면 조용히 파싱 실패한다
+    // (loki_source_syslog_parsing_errors_total 만 오르고 entries_total 은 0).
+    syslog_format            = "rfc3164"
+    label_structured_data   = true
+    labels                  = { job = "docker" }
+  }
+
+  relabel_rules = loki.relabel.syslog_container.rules
+  forward_to    = [loki.process.redact.receiver]
+}
+
+// 2차 방어(12-3) — src/logger_setup.py 의 1차 필터와 같은 패턴. 우리가 고칠 수 없는
+// 컨테이너(bifrost·open-webui)는 여기서만 막을 수 있다. 패턴을 바꾸면 양쪽에 반영할 것.
+loki.process "redact" {
+  forward_to = [loki.write.nas.receiver]
+
+  stage.replace {
+    expression = `(?i)(api[_-]?key\s*[=:]\s*)\S+`
+    replace    = "${1}<REDACTED>"
+  }
+  stage.replace {
+    expression = `(?i)(bearer\s+)[A-Za-z0-9._\-]{8,}`
+    replace    = "${1}<REDACTED>"
+  }
+  stage.replace {
+    expression = `(?i)(authorization\s*[=:]\s*)\S+`
+    replace    = "${1}<REDACTED>"
+  }
+  stage.replace {
+    expression = `(?i)(token\s*[=:]\s*)\S+`
+    replace    = "${1}<REDACTED>"
+  }
+  stage.replace {
+    expression = `(?i)(webhook[s]?/)[A-Za-z0-9._\-/]+`
+    replace    = "${1}<REDACTED>"
+  }
+  stage.replace {
+    expression = `sk-[A-Za-z0-9]{16,}`
+    replace    = "<REDACTED>"
+  }
+}
+
+loki.write "nas" {
+  endpoint {
+    url = "http://" + sys.env("NAS_TAILNET_IP") + ":13100/loki/api/v1/push"
+  }
+}

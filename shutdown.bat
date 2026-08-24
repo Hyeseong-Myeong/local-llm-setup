@@ -20,4 +20,12 @@ echo 4. Stopping Bifrost Docker Containers...
 cd bifrost && docker-compose stop && cd ..
 
 echo.
+echo 5. Terminating local_exporter.py...
+powershell -NoProfile -Command "$procs = Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*local_exporter.py*' }; if ($procs) { $procs | ForEach-Object { Invoke-CimMethod -InputObject $_ -MethodName Terminate -ErrorAction SilentlyContinue | Out-Null; Write-Host '  -[OK] Terminated PID:' $_.ProcessId } } else { Write-Host '  -[SKIP] local_exporter.py is not running.' }"
+
+echo.
+echo 6. Terminating Alloy...
+powershell -NoProfile -Command "$procs = Get-CimInstance Win32_Process | Where-Object { $_.Name -eq 'alloy.exe' -or $_.CommandLine -like '*GrafanaAlloy*' }; if ($procs) { $procs | ForEach-Object { Invoke-CimMethod -InputObject $_ -MethodName Terminate -ErrorAction SilentlyContinue | Out-Null; Write-Host '  -[OK] Terminated PID:' $_.ProcessId } } else { Write-Host '  -[SKIP] Alloy is not running.' }"
+
+echo.
 echo All related AI software has been successfully shut down.
