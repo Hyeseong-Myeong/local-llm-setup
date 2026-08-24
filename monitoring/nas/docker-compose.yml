@@ -59,6 +59,9 @@ services:
       # tailnet(WireGuard) 자체가 암호화되므로 HTTPS 가 아니어도 쿠키를 평문 HTTP 로 둔다.
       # true 로 두면 HTTPS 가 아닌 이 배포에서 로그인이 막힌다(8-3 항목 5).
       - GF_SECURITY_COOKIE_SECURE=false
+      # 기본값(localhost)이면 Discord 알림의 GeneratorURL 이 "http://localhost:3000/..."
+      # 로 나가서 클릭해도 아무 데도 안 열린다(실측) — tailnet IP 로 고정한다.
+      - GF_SERVER_ROOT_URL=http://${TAILNET_BIND_IP}:13000/
       # Discord 웹훅 3종 (9장) — grafana-provisioning/alerting/contact-points.yaml 이
       # $DISCORD_WEBHOOK_URL_* 형태로 참조한다(Grafana 프로비저닝의 환경변수 치환).
       # 비어 있으면 알림이 조용히 안 가는 상태로 뜨는 대신 여기서 바로 막는다.

@@ -1,5 +1,7 @@
 # Discord 연락처 3개 — 심각도별로 채널을 분리한다(9-2: 하나로 몰면 소음에
 # 크리티컬이 묻힌다). 웹훅 URL은 .env 로만 주입한다(커밋 안 함).
+# title/message 는 templates.yaml 의 공용 템플릿을 써서 기본 덤프 대신
+# 요약 + 바로가기 링크만 보낸다.
 apiVersion: 1
 
 contactPoints:
@@ -11,6 +13,8 @@ contactPoints:
         settings:
           url: $DISCORD_WEBHOOK_URL_INFO
           use_discord_username: true
+          title: '{{ template "plg.title" . }}'
+          message: '{{ template "plg.message" . }}'
 
   - orgId: 1
     name: discord-warning
@@ -20,6 +24,8 @@ contactPoints:
         settings:
           url: $DISCORD_WEBHOOK_URL_WARNING
           use_discord_username: true
+          title: '{{ template "plg.title" . }}'
+          message: '{{ template "plg.message" . }}'
 
   - orgId: 1
     name: discord-critical
@@ -29,3 +35,5 @@ contactPoints:
         settings:
           url: $DISCORD_WEBHOOK_URL_ERROR
           use_discord_username: true
+          title: '{{ template "plg.title" . }}'
+          message: '{{ template "plg.message" . }}'
