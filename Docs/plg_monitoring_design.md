@@ -5,15 +5,15 @@
 > 설계 착수 시점에 확인해 반영했다 — 근거와 파급은 **0장** 참조.
 
 > **작성일:** 2026-08-23
-> **관련 문서:** [`troubleshooting.md`](troubleshooting.md) 섹션 14·16·17, [`context_limit_experiment.md`](context_limit_experiment.md)
+> **관련 문서:** [`troubleshooting.md`](troubleshooting.md) 섹션 14·16·17·18, [`context_limit_experiment.md`](context_limit_experiment.md)
 > **성격:** 구축 **전에** 무엇을 왜 모으는지 확정하는 설계 문서. 구축 결과는 이후 별도 절에 기록한다.
-> **상태:** 설계 단계. **아직 아무것도 배포하지 않았다.**
+> **상태:** 2026-08-24 기준 **10장 1~8번 배포·검증 완료**(PR #36~#40 머지, main 반영). 배포 중 발견한 문제 9건은 [`troubleshooting.md`](troubleshooting.md) 섹션 18 참조. 남은 것: NAS `couchdb-obsidian-sync`·`hyeseongkit-hub`·`hyeseongkit-jenkins` 3개 컨테이너 syslog 드라이버 적용(확정 내역 #9), `troubleshooting.md` 상단 TODO 2건.
 
 ---
 
 ## 인계 — 이 문서로 구축을 시작하는 세션에게
 
-**지금 상태:** 설계만 끝났다. 코드도 컨테이너도 없다. 브랜치 `design/plg-monitoring`.
+**지금 상태:** 1~8번 배포 완료. NAS 로그 수집 범위 확대(couchdb-obsidian-sync·hyeseongkit-hub·hyeseongkit-jenkins)만 남았다 — 아래 참고.
 
 **이 문서의 결정은 대부분 실측에 근거한다.** 다시 논의하기 전에 근거를 먼저 읽을 것. 특히 아래 다섯 가지는 **한 번 뒤집혔던 결정**이라 배경을 모르고 되돌리기 쉽다.
 
