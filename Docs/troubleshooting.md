@@ -2,6 +2,15 @@
 
 이 문서는 Open WebUI 및 로컬 모델(Ollama) 사용 중 발생하는 흔한 에러들과 해결 방법을 모아둔 트러블슈팅 가이드입니다.
 
+## 🔴 TODO — 재확인 필요
+
+* **`restart.bat` 후 에이전트 프로세스 일시 중복** (섹션 18, 미해결 항목) — `wiki_agent.py`·`discord_bot.py`가 정상값(2개)이 아니라 4개씩 뜬 적이 1회 있었으나 재현 안 됨. **재발 시** `shutdown.bat` 실행 중 프로세스 목록을 남겨 원인을 특정할 것.
+* **`OLLAMA_DEBUG` 끈 상태의 장기 로그 생성량 실측** (`Docs/plg_monitoring_design.md` 11-2·6-4) — 시작 스크립트에서는 이미 꺼둔 상태(확인됨)지만, 보존 정책을 재조정할 만큼 충분한 기간의 실측 데이터가 아직 없다. **몇 주 누적 후** `log_file_bytes{name="ollama"}` 추이를 확인하고 필요하면 9-1·9-3의 보존 정책을 재조정할 것.
+* **Jenkins 파이프라인 Smoke check에서 Loki `/ready`만 일시 실패** (2026-08-24, PR #40 머지 후 재실행) — `curl -sf http://$TAILNET_BIND_IP:13100/ready`가 exit 22(비-2xx 응답)로 실패, 파이프라인 `FAILURE`. 같은 스테이지의 Prometheus 헬스체크(`/-/healthy`)는 직전에 성공함.
+  * **재확인 결과:** `docker logs loki --tail 50`에 에러 없음(정상 쿼리·compaction 로그뿐). 직후 수동으로 같은 `curl`을 재실행하니 즉시 `200 OK ready` — Loki 자체는 문제없음, 재현도 안 됨.
+  * **유력한 정황:** 실패 시점이 `hyeseongkit-jenkins` 컨테이너를 막 재생성한 직후였다 — Jenkins의 플러그인 전체 재로딩(JVM 워밍업 포함)이 NAS에 순간 부하를 준 타이밍과 겹쳤을 가능성. Prometheus 체크 직후 Loki만 실패한 것과 부합.
+  * **미해결로 남기는 이유:** Jenkinsfile의 Loki 체크에 재시도 로직이 없어 이런 순간 지연에도 파이프라인 전체가 즉시 실패하는 구조다. 원인을 확정하지 못했으니 **재발하면** 이번처럼 바로 `docker logs loki`·수동 `curl`로 그 순간의 상태를 남길 것. 재발이 잦으면 Prometheus 체크처럼 짧은 재시도를 추가하는 것을 검토.
+
 ---
 
 ## 1. 웹 스크래핑(Jina Reader) 사용 시 401 Unauthorized 에러
