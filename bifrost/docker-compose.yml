@@ -31,6 +31,18 @@ services:
       # 허용하는 화이트리스트가 아니므로, 접근 기기를 제한하려면 Tailscale ACL이나
       # OS 방화벽을 별도로 설정해야 한다.
       - "${BIFROST_BIND_IP:-127.0.0.1}:18080:8080"
+    logging:
+      # syslog 드라이버 -> 개발 PC Alloy (설계 4-2). dual-logging 이라 `docker logs` 는
+      # 그대로 유지된다. 로컬 유닉스 syslog 포맷이 기본값이다(syslog-format 미지정).
+      # host.docker.internal 이어야 한다 — Docker Desktop 이 dockerd 를 WSL2 VM
+      # 안에서 돌리므로 127.0.0.1 은 그 VM 자신의 루프백이라 Windows 호스트에
+      # 닿지 않는다(monitoring/devpc/config.alloy 참조, 실측 확인).
+      driver: syslog
+      options:
+        syslog-address: "udp://host.docker.internal:51400"
+        tag: "{{.Name}}"
+        mode: "non-blocking"
+        max-buffer-size: "4m"
     volumes:
       - ./data:/app/data
     environment:
