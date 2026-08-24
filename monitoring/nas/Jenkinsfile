@@ -76,12 +76,15 @@ pipeline {
         stage('Smoke check') {
             steps {
                 withCredentials(composeCredentials) {
+                    // Jenkins 는 별도 컨테이너(jenkins_default 브리지)라 127.0.0.1 은
+                    // Jenkins 자신의 루프백이다 - Prometheus/Loki 의 127.0.0.1 바인딩엔
+                    // 안 닿는다(실측: curl exit 7). tailnet 바인딩으로 확인한다.
                     sh '''
                         sleep 5
                         cd "${DEPLOY_DIR}"
                         docker compose ps
-                        curl -sf http://127.0.0.1:13090/-/healthy && echo " - prometheus OK"
-                        curl -sf http://127.0.0.1:13100/ready && echo " - loki OK"
+                        curl -sf "http://${TAILNET_BIND_IP}:13090/-/healthy" && echo " - prometheus OK"
+                        curl -sf "http://${TAILNET_BIND_IP}:13100/ready" && echo " - loki OK"
                     '''
                 }
             }
