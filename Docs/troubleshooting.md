@@ -6,9 +6,6 @@
 
 * **`restart.bat` 후 에이전트 프로세스 일시 중복** (섹션 18, 미해결 항목) — `wiki_agent.py`·`discord_bot.py`가 정상값(2개)이 아니라 4개씩 뜬 적이 1회 있었으나 재현 안 됨. **재발 시** `shutdown.bat` 실행 중 프로세스 목록을 남겨 원인을 특정할 것.
 * **`OLLAMA_DEBUG` 끈 상태의 장기 로그 생성량 실측** (`Docs/plg_monitoring_design.md` 11-2·6-4) — 시작 스크립트에서는 이미 꺼둔 상태(확인됨)지만, 보존 정책을 재조정할 만큼 충분한 기간의 실측 데이터가 아직 없다. **몇 주 누적 후** `log_file_bytes{name="ollama"}` 추이를 확인하고 필요하면 9-1·9-3의 보존 정책을 재조정할 것.
-* **Jenkins 파이프라인이 Smoke check까지 한 번도 성공 못함 — 재시도 로직 추가, 다음 빌드로 검증 대기** (2026-08-24) — `plg-monitoring-nas` 빌드 1~5번 전체 로그를 대조한 결과, 매번 다른 지점에서 죽으며 실제로는 한 단계씩 전진해왔다: #1 Checkout(Jenkinsfile 못 찾음) → #3 Deploy(자격증명 전부 빈 값, `2ed33e2`로 해결 확인) → #4 Smoke check(Jenkins 자신의 루프백 `curl exit 7`, `d4871b7`로 해결 확인) → #5 Smoke check(Loki `/ready`만 `curl exit 22`). **#5는 파이프라인이 이 지점에 도달한 첫 빌드**라 반복 재현 데이터가 없다 — `docker logs loki`엔 에러 없고 직후 수동 재현은 바로 `200 ready` 성공.
-  * **조치:** 원인을 단정할 근거가 부족한 채로 재시도 없이 단발 curl로 죽는 구조 자체가 문제라고 보고, `monitoring/nas/Jenkinsfile`의 Smoke check을 고정 `sleep 5` + 단발 curl에서 **최대 10회(3초 간격) 재시도 루프**로 교체(`fix/jenkins-pipeline-first-success` 브랜치). curl 버전 의존 플래그(`--retry-all-errors` 등) 대신 셸 루프로 이식성 확보.
-  * **검증 대기:** 다음 Build Now 결과로 Smoke check을 실제로 통과하는지 확인할 것 — 통과하면 이 항목은 닫는다.
 
 ---
 
@@ -859,6 +856,12 @@ netstat -tlnp | grep 8000        # Synology busybox에는 ss가 없다
 * **관찰:** `Smoke check`의 `curl http://127.0.0.1:13090/-/healthy`가 `curl: (7)`(연결 거부)로 실패했다. `docker compose ps`는 4개 컨테이너 모두 `Up`으로 정상 출력됐는데도 그랬다.
 * **원인:** 증상 3과 같은 계열의 실수 — Jenkins는 자기 자신도 별도 컨테이너(`jenkins_default` 브리지 네트워크)다. 파이프라인의 `sh` 스텝 안에서 `127.0.0.1`은 **Jenkins 자신의 루프백**이지 NAS 호스트가 아니다. Prometheus/Loki는 보안 정책상 호스트의 `127.0.0.1`에만 바인딩돼 있어 Jenkins 컨테이너에서는 원리적으로 닿지 않는다.
 * **해결:** Prometheus/Loki가 이미 tailnet IP에도 열려 있으므로(4번 구축 때 개발 PC push 용으로 추가) 그 주소로 확인하도록 스크립트를 고쳤다. 브리지 네트워크의 컨테이너도 호스트의 다른 인터페이스(tailnet)에 바인딩된 서비스에는 정상적으로 닿았다(Grafana→Prometheus 검증 때 이미 확인된 경로와 동일한 원리).
+
+### 🔴 증상 10: Smoke check이 단발 curl이라, 순간 지연 한 번에 파이프라인 전체가 죽었다
+* **관찰:** 증상 9(루프백)를 고치고 처음 도달한 실행에서, `docker compose ps`엔 4개 컨테이너 모두 `Up`(2시간째, 방금 뜬 게 아님)으로 나오는데도 `curl -sf http://$TAILNET_BIND_IP:13100/ready`(Loki)만 `curl: (22)`(비-2xx 응답)로 실패했다. 바로 앞 Prometheus 체크는 통과했다.
+* **원인 조사:** `docker logs loki`엔 에러 없이 정상적인 쿼리·compaction 로그뿐이었고, 실패 직후 같은 `curl`을 수동으로 재실행하니 즉시 `200 ready`가 나왔다 — Loki 자체는 멀쩡했다. 이 지점에 파이프라인이 도달한 게 이번이 처음이라(그 전엔 매번 더 앞 단계에서 죽었다) 반복 재현 데이터가 없어 원인을 확정하지 못했다.
+* **해결:** 원인을 못 밝혀도 고칠 수 있는 부분은 있었다 — 고정 `sleep 5` + 단발 curl로 **어떤 이유로든 한 번 늦으면 그대로 파이프라인이 죽는 구조** 자체가 문제였다. Prometheus·Loki 둘 다 최대 10회(3초 간격) 재시도하는 셸 루프로 바꿨다(curl 버전 의존 플래그 대신 이식성 있는 방식으로). 다음 빌드에서 두 체크 모두 **1번째 시도**에서 바로 통과해, 이전 실패가 일시적 지연이었다는 추정과 들어맞았다.
+* **교훈:** 배포 직후 헬스체크는 "한 번 실패 = 전체 실패"로 설계하면 안 된다. 컨테이너가 `Up` 상태라고 해서 그 안의 서비스가 매 순간 응답 가능하다는 보장은 없다(컴팩션·체크포인트 같은 내부 작업 중 순간적으로 느려질 수 있다). 재현 데이터가 1건뿐일 때 원인을 섣불리 단정하기보다, 그 클래스의 실패 자체를 흡수하는 재시도를 넣는 쪽이 더 견고하다.
 
 ### 🟡 미해결로 남긴 것: `restart.bat` 실행 후 에이전트 프로세스 일시 중복
 * **관찰:** `restart.bat`(→ `shutdown.bat` → `ai-server-start.bat`) 실행 직후 한 번, `wiki_agent.py`·`discord_bot.py`가 정상값(2개)이 아니라 4개씩 떠 있었다 — `shutdown.bat`이 재시작 전의 기존 프로세스를 다 못 죽인 것으로 추정.
