@@ -1,3 +1,4 @@
+import logging
 import os
 import sys
 
@@ -53,6 +54,16 @@ def verify_api_key(credentials: HTTPAuthorizationCredentials = Security(security
         raise HTTPException(status_code=401, detail="유효하지 않은 API Key입니다.")
     return credentials.credentials
 
+# 4-1. 헬스체크 (exporter/local_exporter.py 의 wiki_tool_server_up 이 이걸 친다)
+# 예전에는 exporter 가 /docs(Swagger UI)를 쳤다. 응답 본문을 안 읽고 끊는 바람에
+# 30초마다 ConnectionResetError 트레이스백이 남았고, 액세스 로그까지 더해
+# 09-04 하루치 로그 2,513줄 중 2,358줄이 이 체크 하나였다. 아래 액세스 로그
+# 필터와 짝이다.
+@app.get("/healthz", include_in_schema=False)
+def healthz():
+    return {"status": "ok", "chroma": collection is not None}
+
+
 # 5. 엔드포인트 정의 (Open WebUI가 이 정보를 바탕으로 툴을 등록합니다)
 @app.post("/search_wiki_knowledge", summary="로컬 위키 검색", description="사용자가 '로컬 AI', '위키', '시스템 환경설정', '에러' 등에 대해 구체적으로 질문할 때만 사용하세요. 일반적인 인사나 무관한 질문에는 절대 이 툴을 호출하지 마세요.", operation_id="search_wiki_knowledge")
 def search_wiki_knowledge(request: SearchRequest, api_key: str = Depends(verify_api_key)):
@@ -97,7 +108,20 @@ def get_recent_wiki_titles(request: RecentTitlesRequest, api_key: str = Depends(
     except Exception as e:
         return {"result": f"문서 목록 조회 중 오류가 발생했습니다: {str(e)}"}
 
+class _HealthCheckAccessFilter(logging.Filter):
+    """/healthz 를 uvicorn 액세스 로그에서 뺀다 — 30초마다 한 줄씩 쌓인다.
+
+    logging.config.dictConfig 는 이름 붙은 로거의 핸들러만 갈아끼우고 필터는
+    건드리지 않으므로, uvicorn.run() 이 로깅을 재설정한 뒤에도 이 필터는 남는다.
+    """
+
+    def filter(self, record):
+        return "/healthz" not in record.getMessage()
+
+
 if __name__ == "__main__":
+    logging.getLogger("uvicorn.access").addFilter(_HealthCheckAccessFilter())
+
     print("\n🚀 FastAPI 기반 OpenAPI 툴 서버를 시작합니다. (Port: 9000)")
     print("Open WebUI의 [관리자 패널] > [설정] > [통합] > [도구 서버 관리] (또는 OpenAPI 서버) 에 다음 주소를 추가하세요:")
     print("👉 http://host.docker.internal:9000")

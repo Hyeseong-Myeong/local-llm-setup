@@ -40,7 +40,10 @@ COLLECTION_INTERVAL_SECONDS = 30
 EMBEDDING_CHECK_EVERY_N_TICKS = 10  # 30s * 10 = 5분 — GPU 를 건드리는 호출이라 따로 뗀다.
 
 WIKI_COLLECTION_NAME = "my_wiki_db"
-TOOL_SERVER_URL = "http://127.0.0.1:9000/docs"
+# 전용 헬스체크 경로. 예전에는 /docs(Swagger UI HTML)를 쳤는데, 액세스 로그가
+# 30초마다 한 줄씩 쌓여 앱 로그의 94% 를 차지했다. /healthz 는 uvicorn 액세스
+# 로그에서 걸러진다(src/tools/fastapi_wiki_server.py).
+TOOL_SERVER_URL = "http://127.0.0.1:9000/healthz"
 
 BIFROST_DB_PATH = os.path.join(REPO_ROOT, "bifrost", "data", "config.db")
 
@@ -60,6 +63,68 @@ LOG_FILES = {
 
 # (disk_usage 에 넘길 경로, 라벨). 라벨에서 트레일링 백슬래시를 빼 이스케이프 문제를 피한다.
 HOST_DISK_MOUNTS = [("C:\\", "C:")]
+
+
+def _http_ok(url, timeout=5):
+    """GET 해서 200 이면 1, 아니면 0. 본문을 끝까지 읽고 닫는다.
+
+    🔴 실측: 본문을 안 읽고 닫으면 서버 쪽에는 연결이 강제로 끊긴 것으로 보인다.
+    fastapi 툴 서버는 이 체크마다 asyncio 의 ConnectionResetError 트레이스백을
+    남겼고, 09-04 하루치 로그 2,513줄 중 2,358줄이 이 체크 하나였다.
+    """
+    try:
+        with urlopen(url, timeout=timeout) as resp:
+            resp.read()
+            return 1 if resp.status == 200 else 0
+    except (URLError, OSError, ValueError):
+        return 0
+
+
+# 🔴 실측 사고: chromadb.HttpClient / OpenAIEmbeddingFunction 을 수집 주기마다
+# 새로 만들면서 닫지 않아 17시간 만에 메모리 1.5GB, 핸들 13,000 까지 늘었다.
+# 둘 다 내부에 httpx 커넥션 풀을 들고 있고 close() 를 노출하지 않아, 만드는 쪽에서
+# 재사용하는 것 말고는 회수할 방법이 없다. 아래 두 캐시가 그 역할을 한다.
+CLIENT_REBUILD_MIN_INTERVAL_SECONDS = 300
+
+_client_lock = threading.Lock()
+_chroma_client = None
+_chroma_client_built_at = 0.0
+_embedding_function = None
+
+
+def _cached_chroma_client():
+    global _chroma_client, _chroma_client_built_at
+    with _client_lock:
+        if _chroma_client is None:
+            _chroma_client = get_chroma_client()
+            _chroma_client_built_at = time.monotonic()
+        return _chroma_client
+
+
+def _drop_cached_chroma_client():
+    """망가진 클라이언트를 버려 다음 틱이 새로 연결하게 한다 — 5분에 한 번까지만.
+
+    타임아웃일 때는 아예 버리지 않고, 예외일 때도 이 간격을 지킨다. chromadb 가
+    오래 죽어 있으면 매 틱(30초) 예외가 나는데, 그때마다 새로 만들면 고치려던
+    누수가 그대로 돌아온다. 커넥션 풀은 서버가 돌아오면 스스로 다시 붙으므로
+    대부분의 장애에는 재생성 자체가 필요 없다 — 영구히 맛이 간 클라이언트를
+    회수하는 마지막 수단으로만 남긴다.
+    """
+    global _chroma_client
+    with _client_lock:
+        if _chroma_client is None:
+            return
+        if time.monotonic() - _chroma_client_built_at < CLIENT_REBUILD_MIN_INTERVAL_SECONDS:
+            return
+        _chroma_client = None
+
+
+def _cached_embedding_function():
+    global _embedding_function
+    with _client_lock:
+        if _embedding_function is None:
+            _embedding_function = get_embedding_function()
+        return _embedding_function
 
 
 class Metrics:
@@ -86,11 +151,7 @@ class Metrics:
 def collect_ollama_metrics(m: Metrics):
     """Ollama 상태 (5-1). `ollama_model_gpu_ratio` 가 이 exporter 의 핵심 지표."""
     base = settings.OLLAMA_BASE_URL.rstrip("/")
-    try:
-        with urlopen(f"{base}/api/tags", timeout=5) as resp:
-            up = 1 if resp.status == 200 else 0
-    except (URLError, OSError, ValueError):
-        up = 0
+    up = _http_ok(f"{base}/api/tags")
     m.gauge("ollama_up", up)
     if not up:
         m.gauge("ollama_scrape_error", 1, target="ollama")
@@ -131,12 +192,7 @@ def collect_ollama_metrics(m: Metrics):
 def collect_bifrost_metrics(m: Metrics):
     """Bifrost 게이트웨이 상태 (5-1). `/metrics` 스크랩(6-3)과는 별개 — 이건 config.db 기반."""
     base = settings.BIFROST_BASE_URL.rstrip("/").removesuffix("/v1")
-    try:
-        with urlopen(f"{base}/api/version", timeout=5) as resp:
-            up = 1 if resp.status == 200 else 0
-    except (URLError, OSError, ValueError):
-        up = 0
-    m.gauge("bifrost_up", up)
+    m.gauge("bifrost_up", _http_ok(f"{base}/api/version"))
 
     try:
         conn = sqlite3.connect(f"file:{BIFROST_DB_PATH}?mode=ro", uri=True, timeout=5)
@@ -207,7 +263,7 @@ def _call_with_timeout(fn, timeout):
 def collect_wiki_metrics(m: Metrics):
     """위키 파이프라인 상태 (5-1) — wiki_embedding_up 은 별도 5분 주기(collect_wiki_embedding_metrics)."""
     try:
-        client = get_chroma_client()
+        client = _cached_chroma_client()
         collection = client.get_collection(name=WIKI_COLLECTION_NAME)
         count, timed_out = _call_with_timeout(collection.count, 10)
         if timed_out:
@@ -218,19 +274,15 @@ def collect_wiki_metrics(m: Metrics):
     except Exception:
         # chromadb 예외 계층이 httpx/grpc 등으로 다양해 구체 타입으로 좁히기 어렵다.
         m.gauge("wiki_scrape_error", 1, target="chroma")
+        _drop_cached_chroma_client()
 
-    try:
-        with urlopen(TOOL_SERVER_URL, timeout=5) as resp:
-            up = 1 if resp.status == 200 else 0
-    except (URLError, OSError, ValueError):
-        up = 0
-    m.gauge("wiki_tool_server_up", up)
+    m.gauge("wiki_tool_server_up", _http_ok(TOOL_SERVER_URL))
 
 
 def collect_wiki_embedding_metrics(m: Metrics):
     """실제 임베딩 1회 호출 — GPU 를 건드리므로 5분 주기로만 돈다(부하 관리)."""
     try:
-        ef = get_embedding_function()
+        ef = _cached_embedding_function()
         vectors, timed_out = _call_with_timeout(lambda: ef(["ping"]), 15)
         up = 1 if (not timed_out and vectors) else 0
     except Exception:
@@ -386,13 +438,39 @@ class MetricsHandler(BaseHTTPRequestHandler):
         pass
 
 
+class ExclusiveThreadingHTTPServer(ThreadingHTTPServer):
+    """SO_REUSEADDR 을 끈다 — 같은 포트에 두 번째 exporter 가 붙는 것을 막는다.
+
+    🔴 실측 사고: Python 기본값(allow_reuse_address=1)이 Windows 에서는 "이미
+    쓰고 있는 포트를 가로채도 된다"는 뜻이다. 워치독이 살아있는 exporter 를 죽은
+    것으로 오판하고 하나 더 띄웠을 때 두 프로세스가 13092 에 동시에 바인딩됐고,
+    어느 쪽이 Alloy 의 스크랩에 응답하는지 알 수 없는 상태가 됐다. 게다가 포트는
+    항상 응답하니 워치독은 이 상태를 영원히 못 고친다.
+    끄면 두 번째 기동이 바인딩 단계에서 바로 실패한다.
+    """
+
+    allow_reuse_address = False
+
+
 def main():
+    # 바인딩을 먼저 한다 — 중복 기동이면 여기서 바로 끝내고, Ollama·chromadb 를
+    # 건드리지 않는다. 생성자가 listen 까지 하므로 첫 수집이 끝나기 전에 들어온
+    # 요청은 큐에 쌓일 뿐 빈 응답을 받지 않는다(원래 순서의 의도를 유지한다).
+    try:
+        server = ExclusiveThreadingHTTPServer((BIND_HOST, BIND_PORT), MetricsHandler)
+    except OSError as exc:
+        print(
+            f"local_exporter: {BIND_HOST}:{BIND_PORT} 바인딩 실패 — "
+            f"이미 떠 있는 것으로 보고 종료한다 ({exc})",
+            flush=True,
+        )
+        return 1
+
     psutil.cpu_percent(interval=None)  # 첫 호출은 기준점만 세팅되므로 미리 버린다.
-    _refresh_cache(tick=0)  # 서버가 열리기 전에 첫 수집을 동기로 끝낸다.
+    _refresh_cache(tick=0)  # 서버가 요청을 받기 전에 첫 수집을 동기로 끝낸다.
 
     threading.Thread(target=_background_loop, daemon=True).start()
 
-    server = ThreadingHTTPServer((BIND_HOST, BIND_PORT), MetricsHandler)
     print(f"local_exporter listening on {BIND_HOST}:{BIND_PORT}", flush=True)
     try:
         server.serve_forever()
