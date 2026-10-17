@@ -74,7 +74,9 @@ for category, dir_path in target_dirs:
                 content = f.read()
 
             chunks = text_splitter.split_text(content)
-            base_name = file_name.replace(".md", "")
+            # splitext 로 확장자만 떼낸다 — wiki_agent.py 와 반드시 같은 방식이어야
+            # 한다. 한쪽만 바꾸면 같은 문서가 서로 다른 source 로 갈라진다.
+            base_name = os.path.splitext(file_name)[0]
 
             docs = []
             ids = []
