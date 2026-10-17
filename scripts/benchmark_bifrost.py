@@ -2,6 +2,7 @@
 
 지표는 **토큰/초**다. 지연시간을 그대로 쓰지 않는 이유는 아래 CAP_NOTE 참조.
 """
+import json
 import os
 import time
 
@@ -50,6 +51,61 @@ def _post(base_url: str, api_key: str, model: str, prompt: str, timeout: int) ->
     )
 
 
+def _post_stream(base_url: str, api_key: str, model: str, prompt: str, timeout: int):
+    return requests.post(
+        f"{base_url}/v1/chat/completions",
+        headers={"Authorization": f"Bearer {api_key}"},
+        json={
+            "model": model,
+            "messages": [{"role": "user", "content": prompt}],
+            "max_tokens": MAX_TOKENS,
+            "stream": True,
+        },
+        timeout=timeout,
+        stream=True,
+    )
+
+
+def measure_ttft(base_url: str, api_key: str, model: str) -> float | None:
+    """첫 토큰 도착까지의 시간(TTFT)을 스트리밍으로 재서 돌려준다.
+
+    왜 본 측정과 요청을 분리했는가: 본 측정은 비스트리밍으로 `usage.completion_tokens`
+    를 받아 토큰/초와 출력 상한 적용 여부를 판정한다. 스트리밍으로 바꾸면 그 값을
+    `stream_options.include_usage` 에 의존해야 하는데, 이 게이트웨이는 `max_tokens`
+    조차 전달하지 않는 것이 실측돼 있다(CAP_NOTE) — 같은 식으로 무시될 수 있다.
+    주 지표를 불확실한 옵션에 걸지 않기 위해 요청을 하나 더 쓴다.
+
+    왜 TTFT 를 따로 재는가: Bifrost `/metrics` 에 TTFT 메트릭이 없고(2026-10-17 실측),
+    `bifrost_upstream_latency_seconds` 는 생성 시간까지 포함한 **전체** 지연이라
+    런타임 업그레이드의 TTFT 개선이 희석돼 보이지 않는다. 상시 메트릭이 아니라
+    전후 비교용 일회성 측정이 목적에 맞는 일이다.
+
+    실패하면 None 을 돌려준다 — TTFT 를 못 재는 것이 벤치마크 전체를 깨뜨리지
+    않게 한다(주 지표는 본 측정이 따로 낸다).
+    """
+    try:
+        start = time.perf_counter()
+        with _post_stream(base_url, api_key, model, PROMPT, timeout=180) as resp:
+            resp.raise_for_status()
+            for raw in resp.iter_lines(decode_unicode=True):
+                if not raw:
+                    continue
+                line = raw[6:] if raw.startswith("data: ") else raw
+                if line.strip() == "[DONE]":
+                    break
+                try:
+                    chunk = json.loads(line)
+                except ValueError:
+                    continue
+                delta = (chunk.get("choices") or [{}])[0].get("delta") or {}
+                # 첫 청크는 role 만 담고 content 가 비어 오는 경우가 있다.
+                # 내용이 실제로 도착한 시점을 첫 토큰으로 본다.
+                if delta.get("content"):
+                    return round(time.perf_counter() - start, 3)
+    except Exception:
+        return None
+    return None
+
 def benchmark_model(base_url: str, api_key: str, model: str) -> dict:
     # 워밍업 — 타이머 밖에서 모델을 VRAM에 올린다. 이걸 빼면 측정값에 로딩
     # 시간이 섞여, 회귀가 아니라 로딩 편차를 보게 된다.
@@ -57,6 +113,10 @@ def benchmark_model(base_url: str, api_key: str, model: str) -> dict:
         _post(base_url, api_key, model, WARMUP_PROMPT, timeout=180).raise_for_status()
     except Exception:
         pass  # 워밍업 실패는 본 측정에서 어차피 드러난다
+
+    # 워밍업 뒤, 본 측정 앞에서 잰다 — 모델이 이미 VRAM 에 올라온 상태여야
+    # TTFT 가 로딩 시간에 오염되지 않는다.
+    ttft_sec = measure_ttft(base_url, api_key, model)
 
     start = time.perf_counter()
     resp = _post(base_url, api_key, model, PROMPT, timeout=180)
@@ -70,6 +130,7 @@ def benchmark_model(base_url: str, api_key: str, model: str) -> dict:
 
     return {
         "model": model,
+        "ttft_sec": ttft_sec,
         "latency_sec": round(elapsed, 2),
         "completion_tokens": completion_tokens,
         "tokens_per_sec": (
@@ -115,20 +176,21 @@ def main() -> None:
                 unload_ollama_model(ollama_url, model)
 
     lines = [
-        "| 모델 | 토큰/초 | 지연시간(초) | 생성 토큰 | 출력 상한 | 비고 |",
-        "|---|---|---|---|---|---|",
+        "| 모델 | 토큰/초 | TTFT(초) | 지연시간(초) | 생성 토큰 | 출력 상한 | 비고 |",
+        "|---|---|---|---|---|---|---|",
     ]
     for row in rows:
         if "error" in row:
-            lines.append(f"| {row['model']} | - | - | - | - | 실패: {row['error']} |")
+            lines.append(f"| {row['model']} | - | - | - | - | - | 실패: {row['error']} |")
             continue
         cap = row["cap_state"]
         if cap == "무시됨":
             cap = f"무시됨 (> {MAX_TOKENS})"
         elif cap == "미확정":
             cap = "미확정 (자연 종료)"
+        ttft = row["ttft_sec"] if row.get("ttft_sec") is not None else "측정 실패"
         lines.append(
-            f"| {row['model']} | {row['tokens_per_sec']} | {row['latency_sec']} |"
+            f"| {row['model']} | {row['tokens_per_sec']} | {ttft} | {row['latency_sec']} |"
             f" {row['completion_tokens']} | {cap} | finish={row['finish_reason']} |"
         )
     table = "\n".join(lines) + f"\n\n{CAP_NOTE}"
