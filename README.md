@@ -46,15 +46,33 @@ Bifrost가 `num_ctx`를 전달하지 못해, 컨텍스트를 늘려 쓰는 모�
 상한을 모델 자체에 내장해 뒀습니다(원본의 다른 파라미터는 그대로 상속). 실제로 호출하는 건
 아래 "실사용 모델" 쪽입니다 — 근거는 [`modelfiles/README.md`](modelfiles/README.md).
 
-| 역할 | 실사용 모델 | num_ctx | 원본 | Provider |
+| 역할 | 실사용 모델 | num_ctx | 원본 | 모델 능력 (실측) |
 |---|---|---|---|---|
-| 기본 대화 | `qwen3.5-16k` | 16,384 | `qwen3.5:9b` | Ollama (로컬) |
-| 코딩 | `qwen2.5-coder-16k` | 16,384 | `qwen2.5-coder:7b` | Ollama (로컬) |
-| 비전 | `gemma4-e4b-64k` | 65,536 | `gemma4:e4b` | Ollama (로컬) |
-| 임베딩 | `bge-m3` | 기본값 | — | Ollama (로컬) |
-| RAG 폴백 | `exaone3.5:7.8b` | 기본값 | — | Ollama (로컬) |
-| 면접/추론 | `deepseek-r1:14b` | 기본값 | — | Ollama (로컬) |
+| **Wiki Agent 메인** (`.env` `MODEL_NAME`) | `gemma4-e4b-64k` | 65,536 | `gemma4:e4b` | vision · **audio** · tools · thinking |
+| 기본 대화 (Open WebUI) | `qwen3.5-16k` | 16,384 | `qwen3.5:9b` | vision · tools · thinking |
+| 코딩 (FIM 자동완성) | `qwen2.5-coder-16k` | 16,384 | `qwen2.5-coder:7b` | completion · tools · **insert** |
+| 임베딩 | `bge-m3` | 기본값 | — | embedding (dense+sparse+multi-vector) |
+| 추론 (⚠️ 아래 주석) | `deepseek-r1:14b` | 기본값 | — | tools · thinking |
 | 클라우드 폴백 | Gemini 1.5 Pro/Flash, Claude 3.5 Sonnet, Llama3 (Groq/Cerebras), Codestral (Mistral) | — | — | 각 API |
+
+> **역할 배분의 근거 — "비전 전용 모델"은 없다.**
+> `qwen3.5:9b`와 `gemma4:e4b`는 **둘 다 비전을 지원**한다(`ollama show` 실측: `qwen3.5:9b`는
+> 27블록 비전 타워를 내장하며 네이티브 컨텍스트가 262,144다). 따라서 `gemma4-e4b-64k`를 쓰는
+> 이유는 비전이 아니라 ① **오디오 입력을 하는 유일한 모델**이고 ② **적재 크기가 3.37GB로 가장 가벼워**
+> 긴 컨텍스트(65,536)와 임베딩 동시 상주를 함께 가져갈 수 있다는 점이다 — Wiki Agent의
+> 문서 컴파일 파이프라인에 이 조합이 맞아 `MODEL_NAME`으로 지정돼 있다.
+>
+> **`qwen2.5-coder-16k` 를 2024년 모델인데도 유지하는 이유는 `insert` 다.** `insert` 가
+> FIM(fill-in-the-middle, 탭 자동완성)의 실체이며, **`qwen3.5:9b` 와 `gemma4:e4b` 에는 이 능력이 없다**
+> (`ollama show` 실측). 신형 범용 모델로 대체되지 않는 자리다.
+>
+> **16,384 / 65,536 상한은 모델 한계가 아니라 VRAM 결정이다.** 두 모델의 네이티브 컨텍스트는
+> 각각 262,144 · 131,072이며, 상한을 낮춘 이유는 임베딩 모델과의 동시 상주다
+> (근거: [`modelfiles/README.md`](modelfiles/README.md), [`Docs/context_limit_experiment.md`](Docs/context_limit_experiment.md)).
+>
+> ⚠️ **`deepseek-r1:14b`는 적재 크기 8.99GB로 이 기기의 VRAM 실효 예산(약 6.7GB)을 넘어
+> 항상 CPU 분할 상태다.** 게다가 thinking은 위 두 모델이 네이티브로 지원하므로 역할이 겹친다.
+> 라우팅 우선순위를 낮게 두거나 정리 대상으로 본다.
 
 ## 레포 구조
 
@@ -103,6 +121,7 @@ cp .env.example .env
 ollama create qwen3.5-16k        -f modelfiles/qwen3.5-16k.Modelfile
 ollama create qwen2.5-coder-16k  -f modelfiles/qwen2.5-coder-16k.Modelfile
 ollama create gemma4-e4b-64k     -f modelfiles/gemma4-e4b-64k.Modelfile
+ollama create gemma4-e4b-128k    -f modelfiles/gemma4-e4b-128k.Modelfile   # 야간 배치 전용
 ```
 
 ### Bifrost 게이트웨이 / Open WebUI 시작
@@ -133,6 +152,7 @@ NAS 쪽 PLG 모니터링 스택은 이 저장소에서 직접 배포하지 않�
 - [`Docs/README.md`](Docs/README.md) — 전체 시스템 구성도 상세 설명 (앱 파이프라인/배포 토폴로지/모니터링/CI)
 - [`Docs/plg_monitoring_design.md`](Docs/plg_monitoring_design.md) — PLG 모니터링 스택 설계·구축 기록
 - [`modelfiles/README.md`](modelfiles/README.md) — 확장 컨텍스트 Modelfile 가이드
+- [`Docs/local_model_feature_proposals.md`](Docs/local_model_feature_proposals.md) — 로컬 모델 활용 기능 제안서 (툴 콜링·vision·리랭커·야간 배치·메트릭)
 - [`Docs/model_tuning.md`](Docs/model_tuning.md) — 모델별 파라미터 튜닝 가이드
 - [`Docs/llm_webui_config.md`](Docs/llm_webui_config.md) — Open WebUI 커스텀 설정 가이드
 - [`Docs/troubleshooting.md`](Docs/troubleshooting.md) — 운영 중 발생한 에러/해결 로그

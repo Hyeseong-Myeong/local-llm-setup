@@ -4,6 +4,15 @@
 > 기존 구축 상태: Ollama + Open WebUI, ChromaDB(8000), `wiki_agent.py`(Watchdog 기반 Obsidian 자동 정리), `discord_bot.py`, Langfuse 관측
 > 목적: 취업 준비(백엔드/인프라), 코딩·인프라 실무 보조, 위키 자동화 고도화, 멀티모델 운영 안정성, 반복 작업 자동화, AI 네이티브 개발 파이프라인 구축을 이 하드웨어 한계 안에서 최대치로 끌어올리는 방안 정리
 
+> 🔴 **2026-10-15 갱신 — 이 문서는 2026-07 시점의 분석이며 모델 라인업이 그 뒤 바뀌었다.**
+> `phi4:latest` · `exaone3.5:7.8b` · `nomic-embed-text` 를 **삭제했다**(세 모델 모두
+> `capabilities` 가 `completion`/`embedding` 뿐으로 tools·thinking·vision 을 전혀 못 쓴다).
+> 아래 1-2 배치표의 "기존 유지" 표기 중 그 두 모델 행은 **더 이상 유효하지 않다.**
+> 현재 라인업과 역할 배분은 [루트 README 모델 라인업](../README.md#모델-라인업-bifrost-기준),
+> 활용 계획은 [`local_model_feature_proposals.md`](local_model_feature_proposals.md) 를 보라.
+>
+> 이 문서 본문은 **당시 판단 근거로서 보존한다** — 소급 수정하지 않는다.
+
 ---
 
 ## 0. 전제 및 확인 필요 사항
@@ -39,9 +48,9 @@ ollama ps   # 현재 VRAM에 올라와 있는 모델 확인
 |---|---|---|---|---|
 | 심층 리팩토링·아키텍처 설계 | `deepseek-r1:14b` (기존 유지) | Q4, 초당 15~20토큰 | 32GB RAM에 여유롭게 안착 | 복잡한 버그 추적, 설계 리뷰 전담 |
 | **코딩 실무 보조 (신규 1순위)** | `qwen3-coder:30b-a3b-q4_K_M` | **약 19GB**, 30.5B 총 파라미터 중 3.3B 활성 | GPU(8GB)+RAM(32GB) 분할 구동 가능 — 이 하드웨어의 코딩 성능 상한선 | Spring Boot/FastAPI/Terraform 리뷰, IDE 연동용 |
-| 빠른 로직 디버깅·핑퐁 | `phi4:latest` (기존 유지) | 14B, 초당 15~20토큰 | 기존 안착 확인됨 | 엄격한 로직/수학 검증 |
+| ~~빠른 로직 디버깅·핑퐁~~ | ~~`phi4:latest` (기존 유지)~~ | ~~14B, 초당 15~20토큰~~ | ❌ **2026-10-15 삭제** | 대체: `qwen3.5-16k` (thinking 네이티브 지원) |
 | **위키 태깅·분류 (경량, 신규)** | `exaone4.0:1.2b` | 1.2B, 매우 가벼움 | VRAM 여유 큼, 상시 구동 가능 | `wiki_agent.py`의 classify 단계 전담 — 큰 모델과 VRAM 경합 없음 |
-| 한국어 심층 문서·이력서 첨삭 | `exaone3.5:7.8b` (기존 유지) | 8GB VRAM 100% 안착 | 그대로 유지 | 3-1 참고 |
+| ~~한국어 심층 문서·이력서 첨삭~~ | ~~`exaone3.5:7.8b` (기존 유지)~~ | ~~8GB VRAM 100% 안착~~ | ❌ **2026-10-15 삭제** | 대체: 문서=`gemma4-e4b-64k`, 이력서=`qwen3.5-16k` ([`llm_webui_config.md`](llm_webui_config.md) 3장) |
 | **에이전트/툴콜링 (신규, 검증 필요)** | `gemma4:e4b` 또는 `gemma4:26b-a4b` | 정확한 양자화 용량 **미확인** — `ollama pull` 전 `ollama show` 또는 Ollama 라이브러리 페이지로 실제 GB 확인 필요 | 에이전트 워크플로우/함수 호출에 특화 | MCP 도구 호출 안정성이 중요한 3장/5장 워크플로우에 우선 시도 |
 | 장문 컨텍스트·멀티파일 리팩토링 | `ministral3:14b` (reasoning 변형) | 14B, 32GB RAM 혼합 구동 | 신규 후보 | 프로젝트 통째 리팩토링 시 시도 |
 | ❌ 비추천 | GPT-OSS-20B | 16~24GB VRAM 권장 | **이 하드웨어엔 부적합** (5~20배 저하) | 기존 문서 정정 |
