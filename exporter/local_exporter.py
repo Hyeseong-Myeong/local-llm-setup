@@ -61,6 +61,20 @@ LOG_FILES = {
 # (disk_usage 에 넘길 경로, 라벨). 라벨에서 트레일링 백슬래시를 빼 이스케이프 문제를 피한다.
 HOST_DISK_MOUNTS = [("C:\\", "C:")]
 
+# 적재 상태를 "항상" 내보낼 모델. /api/ps 는 적재된 것만 돌려주므로, 이 목록에 없으면
+# 모델이 내려간 순간 시계열 자체가 사라진다 — PromQL 필터식이 빈 결과를 내고 Grafana 가
+# NoData 로 취급해 오탐이 되는 바로 그 함정이다(troubleshooting.md 섹션 18 증상 4).
+# 그래서 이 목록의 모델은 미적재 시에도 0 을 낸다.
+WATCHED_MODELS = [
+    "bge-m3:latest",  # 임베딩 — ④ 야간 배치가 내렸다가 복구해야 하는 대상
+    "gemma4-e4b-64k:latest",  # wiki_agent 메인 (.env MODEL_NAME)
+    "qwen3.5-16k:latest",  # Open WebUI 기본 대화
+]
+
+# ④ 야간 배치가 들고 있는 락 파일. tmp/ 는 .gitignore 대상이다.
+# 배치가 아닌데 임베딩이 내려가 있으면 RAG 장애 — 그 판정에 이 값이 필요하다.
+NIGHTLY_BATCH_LOCK = os.path.join(REPO_ROOT, "tmp", "nightly_batch.lock")
+
 
 class Metrics:
     """Prometheus 텍스트 포맷 라인을 모은다."""
@@ -116,6 +130,22 @@ def collect_ollama_metrics(m: Metrics):
         m.gauge("ollama_model_vram_bytes", size_vram, model=name)
         m.gauge("ollama_model_gpu_ratio", ratio, model=name)
         m.gauge("ollama_model_context_length", model.get("context_length", 0), model=name)
+
+    loaded_names = {model.get("name", "unknown") for model in models}
+
+    # 적재 전이를 세어 재적재 비용(채팅<->임베딩 전환마다 약 7초) 발생 빈도를 남긴다.
+    global _prev_loaded_models
+    if _prev_loaded_models is not None:
+        for newly in loaded_names - _prev_loaded_models:
+            _model_reload_totals[newly] = _model_reload_totals.get(newly, 0) + 1
+    _prev_loaded_models = loaded_names
+
+    # 감시 대상은 미적재(0)일 때도 반드시 시계열을 낸다 — NoData 오탐 방지.
+    for watched in WATCHED_MODELS:
+        m.gauge("ollama_model_resident", 1 if watched in loaded_names else 0, model=watched)
+        m.gauge(
+            "ollama_model_reload_total", _model_reload_totals.get(watched, 0), model=watched
+        )
 
     runner_count = 0
     for proc in psutil.process_iter(["name"]):
@@ -289,6 +319,26 @@ def collect_process_metrics(m: Metrics):
             m.gauge("log_scrape_error", 1, target=label)
 
 
+def collect_nightly_batch_metrics(m: Metrics):
+    """④ 야간 배치 상태. 배치를 아직 만들지 않았어도 항상 0 을 낸다.
+
+    알림 조건은 두 지표의 조합이다 —
+      `ollama_model_resident{model="bge-m3:latest"} == 0` 이면서
+      `nightly_batch_mode == 0` 이면 "배치가 아닌데 임베딩이 내려가 있다" = RAG 장애.
+    락이 남은 채 나이가 계속 늘면 배치가 복구 단계([6])를 못 거치고 죽은 것이다.
+    """
+    present = os.path.isfile(NIGHTLY_BATCH_LOCK)
+    m.gauge("nightly_batch_mode", 1 if present else 0)
+
+    age = 0
+    if present:
+        try:
+            age = round(time.time() - os.path.getmtime(NIGHTLY_BATCH_LOCK), 1)
+        except OSError:
+            age = 0
+    m.gauge("nightly_batch_lock_age_seconds", age)
+
+
 def collect_host_metrics(m: Metrics):
     """PC 자원 (5-1). GPU 는 별도 대리 지표(ollama_model_gpu_ratio)를 쓴다 — 여긴 CPU/메모리/디스크뿐."""
     try:
@@ -321,6 +371,12 @@ def collect_host_metrics(m: Metrics):
         m.gauge("host_scrape_error", 1, target="uptime")
 
 
+# 적재 전이(미적재 -> 적재) 횟수. 30초 폴링이라 그보다 짧은 적재는 놓친다 — 추세용이다.
+# None 은 "아직 한 번도 관측하지 않음" — 첫 수집에서 이미 올라가 있던 모델을 재적재로
+# 세지 않기 위해 빈 집합과 구분한다(그렇지 않으면 exporter 기동마다 전부 +1 이 된다).
+_prev_loaded_models = None
+_model_reload_totals = {}
+
 _cache_lock = threading.Lock()
 _cached_text = "# local_exporter: 아직 첫 수집 전\n"
 _cached_embedding_lines = []
@@ -333,6 +389,7 @@ def _collect_once(tick: int) -> str:
         collect_bifrost_metrics,
         collect_wiki_metrics,
         collect_process_metrics,
+        collect_nightly_batch_metrics,
         collect_host_metrics,
     ):
         try:
