@@ -69,7 +69,7 @@ def list_wiki_documents(collection, limit: int = 10, category: str | None = None
         got = collection.get(where={"category": category} if category else None)
     except Exception as exc:
         logger.exception("문서 목록 조회 실패")
-        return f"문서 목록 조회 중 오류가 발생했습니다: {exc}"
+        return "문서 목록 조회 중 오류가 발생했습니다."
 
     metas = got.get("metadatas") or []
     if not metas:
