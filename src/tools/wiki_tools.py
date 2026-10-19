@@ -10,7 +10,11 @@ Docs/local_model_feature_proposals.md ① 1-1 의 확정 사양을 구현한다.
 """
 import logging
 
-import reranker
+# `from tools import reranker` 여야 한다 — 맨몸 `import reranker` 는 src/tools 가
+# sys.path 에 있을 때만 동작해서, 이 모듈을 `tools.wiki_tools` 로 임포트하는
+# 소비처(wiki_qa_agent · nightly_batch)에서 ModuleNotFoundError 가 난다.
+# 소비처 3곳 모두 src/ 를 path 에 올리고 `from tools...` 로 부르므로 그쪽에 맞춘다.
+from tools import reranker
 
 logger = logging.getLogger(__name__)
 
