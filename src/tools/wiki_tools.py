@@ -10,6 +10,8 @@ Docs/local_model_feature_proposals.md ① 1-1 의 확정 사양을 구현한다.
 """
 import logging
 
+import reranker
+
 logger = logging.getLogger(__name__)
 
 # `category` 는 프라이버시 경계의 집행 수단이다(① 1-1 부수 발견).
@@ -17,8 +19,24 @@ logger = logging.getLogger(__name__)
 PUBLIC_CATEGORY = "tech"
 
 
-def search_wiki(collection, query: str, n_results: int = 3, category: str | None = None) -> str:
-    """위키를 벡터 검색해 사람이 읽는 문자열로 돌려준다.
+# 리랭킹 전 1단계에서 넉넉히 가져올 개수. 2단계(cross-encoder)가 이 중에서 고른다.
+# 재현율 위주로 넓게 받아 정확도 위주로 좁히는 것이 2단계 검색의 요점이다.
+RERANK_FETCH_K = 20
+
+
+def search_wiki(
+    collection,
+    query: str,
+    n_results: int = 3,
+    category: str | None = None,
+    use_rerank: bool = True,
+) -> str:
+    """위키를 검색해 사람이 읽는 문자열로 돌려준다.
+
+    리랭커를 쓸 수 있으면 2단계로 돈다 —
+      1단계: bge-m3 벡터 검색으로 top-RERANK_FETCH_K (빠르고 재현율 위주)
+      2단계: cross-encoder 로 재채점해 top-n_results (정확도 위주)
+    못 쓰면 1단계 결과를 그대로 쓴다. 리랭커 장애가 검색을 멈추지 않는다.
 
     category 를 주면 그 분류 안에서만 찾는다 — 외부 전송 경로에서 `#personal` 을
     배제하는 데 쓴다(주의에 맡기지 않고 쿼리로 강제).
@@ -26,7 +44,11 @@ def search_wiki(collection, query: str, n_results: int = 3, category: str | None
     if collection is None:
         return "오류: 위키 데이터베이스(ChromaDB)에 연결되어 있지 않습니다."
 
-    kwargs = {"query_texts": [query], "n_results": n_results}
+    # 리랭커를 쓸 수 있으면 1단계에서 넓게 받아 2단계가 고르게 한다.
+    rerank_on = use_rerank and reranker.available()
+    fetch_n = max(n_results, RERANK_FETCH_K) if rerank_on else n_results
+
+    kwargs = {"query_texts": [query], "n_results": fetch_n}
     if category:
         kwargs["where"] = {"category": category}
 
@@ -44,6 +66,17 @@ def search_wiki(collection, query: str, n_results: int = 3, category: str | None
         return f"'{query}'에 대한 위키 지식을 찾을 수 없습니다."
 
     metas = (results.get("metadatas") or [[]])[0]
+
+    if rerank_on:
+        order = reranker.rerank(query, list(docs), n_results)
+        if order is not None:
+            docs = [docs[i] for i in order]
+            metas = [metas[i] if i < len(metas) else None for i in order]
+        else:
+            # 리랭커가 실패했다 — 벡터 검색 순서를 그대로 쓴다(검색을 멈추지 않는다).
+            docs, metas = docs[:n_results], metas[:n_results]
+    else:
+        docs, metas = docs[:n_results], metas[:n_results]
     parts = []
     for meta, doc in zip(metas, docs):
         meta = meta or {}

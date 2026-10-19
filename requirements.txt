@@ -25,5 +25,12 @@ python-dotenv==1.2.2
 requests==2.34.2
 watchdog==6.0.0
 
+# Reranker (Docs/local_model_feature_proposals.md ③) — CPU 전용 cross-encoder.
+# 기본값은 꺼져 있다(WIKI_RERANK=0) — 대화형 경로에 쓸 수 없는 지연이 실측됐다.
+sentence-transformers==6.1.0
+# chromadb 와 공유하는 라이브러리. sentence-transformers 가 올리려 하므로 고정한다 —
+# 돌아가는 RAG 스택에 통제되지 않은 변경이 들어가지 않게 한다.
+huggingface_hub==1.21.0
+
 # Monitoring (exporter/local_exporter.py)
 psutil==7.2.2
