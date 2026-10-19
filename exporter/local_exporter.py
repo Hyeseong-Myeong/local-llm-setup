@@ -72,6 +72,7 @@ WATCHED_MODELS = [
     "bge-m3:latest",  # 임베딩 — ④ 야간 배치가 내렸다가 복구해야 하는 대상
     "gemma4-e4b-64k:latest",  # wiki_agent 메인 (.env MODEL_NAME)
     "qwen3.5-16k:latest",  # Open WebUI 기본 대화
+    "gemma4-e4b-128k:latest",  # ④ 야간 배치 전용 — 배치 중에만 1 이어야 한다
 ]
 
 # ④ 야간 배치가 들고 있는 락 파일. tmp/ 는 .gitignore 대상이다.
@@ -412,15 +413,31 @@ def collect_nightly_batch_metrics(m: Metrics):
     락이 남은 채 나이가 계속 늘면 배치가 복구 단계([6])를 못 거치고 죽은 것이다.
     """
     present = os.path.isfile(NIGHTLY_BATCH_LOCK)
-    m.gauge("nightly_batch_mode", 1 if present else 0)
 
     age = 0
+    stale = 0
     if present:
         try:
             age = round(time.time() - os.path.getmtime(NIGHTLY_BATCH_LOCK), 1)
         except OSError:
             age = 0
+        # 🔴 버려진 락을 "배치 중"으로 보고하면 안 된다. 2026-10-19 고장 주입
+        # 시험에서 확인된 문제다 — 강제 종료는 finally 를 건너뛰어 락을 남기고,
+        # 그 락 때문에 nightly_batch_mode 가 계속 1 이 되면 임베딩 장애 알림
+        # 조건(resident==0 and batch_mode==0)이 영구히 가려진다.
+        # 기록된 PID 가 죽었으면 배치 중이 아니다.
+        # (같은 판정이 nightly_batch.lock_is_stale 에도 있다 — 그쪽은 다음 실행을
+        #  막지 않기 위해, 여기는 알림을 가리지 않기 위해 필요하다.)
+        try:
+            with open(NIGHTLY_BATCH_LOCK, encoding="utf-8") as f:
+                pid = int(json.load(f).get("pid", 0))
+            stale = 0 if (pid and psutil.pid_exists(pid)) else 1
+        except (OSError, ValueError, TypeError):
+            stale = 1
+
+    m.gauge("nightly_batch_mode", 1 if (present and not stale) else 0)
     m.gauge("nightly_batch_lock_age_seconds", age)
+    m.gauge("nightly_batch_lock_stale", stale)
 
 
 def collect_host_metrics(m: Metrics):
