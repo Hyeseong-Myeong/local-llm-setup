@@ -29,7 +29,7 @@ def search_wiki(
     query: str,
     n_results: int = 3,
     category: str | None = None,
-    use_rerank: bool = True,
+    use_rerank: bool | None = None,
 ) -> str:
     """위키를 검색해 사람이 읽는 문자열로 돌려준다.
 
@@ -38,14 +38,24 @@ def search_wiki(
       2단계: cross-encoder 로 재채점해 top-n_results (정확도 위주)
     못 쓰면 1단계 결과를 그대로 쓴다. 리랭커 장애가 검색을 멈추지 않는다.
 
+    use_rerank: None=환경변수 플래그를 따름(기본 꺼짐) / True=강제 켬(야간 배치) /
+    False=강제 끔. 대화형 경로는 기본값(None)을 그대로 쓴다 — 실측 지연이 커서
+    에이전트 루프에 넣을 수 없다(reranker.py 상단 주석 참조).
+
     category 를 주면 그 분류 안에서만 찾는다 — 외부 전송 경로에서 `#personal` 을
     배제하는 데 쓴다(주의에 맡기지 않고 쿼리로 강제).
     """
     if collection is None:
         return "오류: 위키 데이터베이스(ChromaDB)에 연결되어 있지 않습니다."
 
-    # 리랭커를 쓸 수 있으면 1단계에서 넓게 받아 2단계가 고르게 한다.
-    rerank_on = use_rerank and reranker.available()
+    # use_rerank 는 3상태다 —
+    #   None  : 환경변수 플래그를 따른다(기본값은 꺼짐)
+    #   True  : 플래그를 무시하고 켠다 — ④ 야간 배치가 쓰는 경로
+    #   False : 끈다
+    if use_rerank is False:
+        rerank_on = False
+    else:
+        rerank_on = reranker.available(force=bool(use_rerank))
     fetch_n = max(n_results, RERANK_FETCH_K) if rerank_on else n_results
 
     kwargs = {"query_texts": [query], "n_results": fetch_n}
@@ -68,7 +78,7 @@ def search_wiki(
     metas = (results.get("metadatas") or [[]])[0]
 
     if rerank_on:
-        order = reranker.rerank(query, list(docs), n_results)
+        order = reranker.rerank(query, list(docs), n_results, force=bool(use_rerank))
         if order is not None:
             docs = [docs[i] for i in order]
             metas = [metas[i] if i < len(metas) else None for i in order]
