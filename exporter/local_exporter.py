@@ -78,6 +78,10 @@ WATCHED_MODELS = [
 # 배치가 아닌데 임베딩이 내려가 있으면 RAG 장애 — 그 판정에 이 값이 필요하다.
 NIGHTLY_BATCH_LOCK = os.path.join(REPO_ROOT, "tmp", "nightly_batch.lock")
 
+# ③ 리랭커가 적는 누적 통계. 이 호출은 Bifrost 를 지나지 않아 Langfuse 에 안 잡히므로
+# (rerank 는 OpenAI 스펙 밖이라 게이트웨이 경유가 불가능하다) 관측을 PLG 로 돌린다.
+RERANKER_STATS = os.path.join(REPO_ROOT, "tmp", "reranker_stats.json")
+
 
 def _http_ok(url, timeout=5):
     """GET 해서 200 이면 1, 아니면 0. 본문을 끝까지 읽고 닫는다.
@@ -371,6 +375,34 @@ def collect_process_metrics(m: Metrics):
             m.gauge("log_scrape_error", 1, target=label)
 
 
+def collect_reranker_metrics(m: Metrics):
+    """③ 리랭커 통계. 파일이 없으면(= 아직 한 번도 안 돌았으면) 0 을 낸다.
+
+    리랭커는 기본값이 꺼져 있다(대화형 경로에 쓸 수 없는 지연이 실측됐다) —
+    따라서 calls_total 이 0 으로 머무는 것이 정상 상태다. 값이 올라가면 누군가
+    WIKI_RERANK=1 로 켠 것이고, 그때 지연이 관측된다.
+    """
+    stats = {}
+    try:
+        with open(RERANKER_STATS, encoding="utf-8") as f:
+            stats = json.load(f)
+    except (OSError, ValueError):
+        stats = {}
+
+    calls = int(stats.get("calls_total", 0) or 0)
+    latency_sum = float(stats.get("latency_sum", 0.0) or 0.0)
+    m.gauge("reranker_calls_total", calls)
+    m.gauge("reranker_failures_total", int(stats.get("failures_total", 0) or 0))
+    m.gauge("reranker_docs_total", int(stats.get("docs_total", 0) or 0))
+    m.gauge("reranker_latency_seconds_sum", round(latency_sum, 4))
+    m.gauge("reranker_last_latency_seconds", float(stats.get("last_latency_sec", 0.0) or 0.0))
+    # 평균은 Prometheus 에서 유도할 수 있으나, 패널 없이도 바로 보이게 함께 낸다.
+    m.gauge(
+        "reranker_latency_seconds_avg",
+        round(latency_sum / calls, 4) if calls else 0,
+    )
+
+
 def collect_nightly_batch_metrics(m: Metrics):
     """④ 야간 배치 상태. 배치를 아직 만들지 않았어도 항상 0 을 낸다.
 
@@ -442,6 +474,7 @@ def _collect_once(tick: int) -> str:
         collect_wiki_metrics,
         collect_process_metrics,
         collect_nightly_batch_metrics,
+        collect_reranker_metrics,
         collect_host_metrics,
     ):
         try:
