@@ -32,9 +32,12 @@ def search_wiki(collection, query: str, n_results: int = 3, category: str | None
 
     try:
         results = collection.query(**kwargs)
-    except Exception as exc:
+    except Exception:
+        # 예외 내용을 호출자에게 돌려주지 않는다 — CodeQL "Information exposure
+        # through an exception". 전체 트레이스백은 logger.exception 이 서버 로그에
+        # 남기므로 진단 정보를 잃지 않는다.
         logger.exception("위키 검색 실패: query=%r", query)
-        return f"위키 검색 중 오류가 발생했습니다: {exc}"
+        return "위키 검색 중 오류가 발생했습니다."
 
     docs = (results.get("documents") or [[]])[0]
     if not docs:
@@ -67,7 +70,7 @@ def list_wiki_documents(collection, limit: int = 10, category: str | None = None
 
     try:
         got = collection.get(where={"category": category} if category else None)
-    except Exception as exc:
+    except Exception:
         logger.exception("문서 목록 조회 실패")
         return "문서 목록 조회 중 오류가 발생했습니다."
 
@@ -128,9 +131,9 @@ def read_wiki_document(collection, source: str) -> str:
 
     try:
         got = collection.get(where={"source": source})
-    except Exception as exc:
+    except Exception:
         logger.exception("문서 읽기 실패: source=%r", source)
-        return f"문서를 읽는 중 오류가 발생했습니다: {exc}"
+        return "문서를 읽는 중 오류가 발생했습니다."
 
     docs = got.get("documents") or []
     if not docs:
