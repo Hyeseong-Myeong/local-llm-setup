@@ -14,6 +14,27 @@ policies:
     group_interval: 5m
     repeat_interval: 4h
     routes:
+      # 🔴 이 라우트가 severity 라우트들보다 먼저 와야 한다 — Grafana 는 첫 번째로
+      # 매칭되는 라우트를 쓰고, 이 규칙은 severity=critical 이라 아래 라우트에
+      # 먼저 걸리면 repeat_interval 1h 가 적용된다.
+      #
+      # 왜 따로 빼는가: "Dev PC metrics stopped arriving" 는 푸시 부재로만 감지되는
+      # 규칙이라(6-1) **PC 를 절전/종료하면 반드시 발동한다** — 고장과 구분할 수가
+      # 없다. critical 로 두는 것은 맞지만(정말 죽었을 때 알아야 한다), 1시간마다
+      # 다시 보내면 자는 동안 알림이 쌓여 9-2 가 지키려는 "🔴 등급의 무게"를 깎는다.
+      #
+      # repeat_interval 을 길게 둬서 **절전 1회당 알림 1회**가 되게 한다. PC 가
+      # 깨어나면 알림이 해소(resolved)되고, 다음 절전은 새 발동이라 다시 1회 온다.
+      # Grafana 에 "한 번만 보내기" 옵션은 없으므로 이것이 가장 가까운 형태다.
+      - receiver: discord-critical
+        object_matchers:
+          - ["alertname", "=", "Dev PC metrics stopped arriving"]
+        group_by: []
+        group_wait: 10s
+        group_interval: 1m
+        repeat_interval: 168h
+        continue: false
+
       - receiver: discord-critical
         object_matchers:
           - ["severity", "=", "critical"]

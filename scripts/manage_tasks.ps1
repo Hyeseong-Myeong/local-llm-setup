@@ -16,6 +16,28 @@ $Tasks = @(
     @{ Name = "LocalLLM-CleanupLogs"
        Script = "C:\local_LLM\scripts\cleanup_logs.ps1"
        Trigger = "Daily"; At = "04:00" }
+    # Nightly vault cross-check (Docs/local_model_feature_proposals.md 4).
+    #
+    # RunAs = "User", not SYSTEM, unlike the two tasks above. Reasons:
+    #   - The reranker loads its model from the *user's* HuggingFace cache
+    #     (~/.cache/huggingface, ~2.2GB). SYSTEM has a different profile and no
+    #     HOME, so it would re-download or fail outright.
+    #   - It needs the venv and the repo .env the same way an interactive run does.
+    # LogonType Interactive means "only runs while the user is logged on", which
+    # is true on this desktop; sleep suspends the session but does not end it.
+    #
+    # WakeToRun + StartWhenAvailable are both set (see New-SettingsFor):
+    #   - WakeToRun covers S3 sleep, best effort - it also needs the power plan's
+    #     "Allow wake timers" enabled (verify: powercfg /query, and BIOS).
+    #   - StartWhenAvailable is the safety net for hibernate/shutdown, where wake
+    #     timers generally do not fire. The batch itself then refuses to run
+    #     outside 04-09h (ALLOWED_HOUR_RANGE) so a late catch-up cannot take the
+    #     embedding model down in the middle of a working day.
+    @{ Name = "LocalLLM-NightlyBatch"
+       Script = "C:\local_LLM\src\agent\nightly_batch.py"
+       Interpreter = "C:\local_LLM\venv\Scripts\python.exe"
+       Trigger = "Daily"; At = "05:00"
+       RunAs = "User"; WakeToRun = $true }
 )
 
 function New-TriggerFor($t) {
@@ -30,19 +52,50 @@ function New-TriggerFor($t) {
         -RepetitionDuration (New-TimeSpan -Days 3650)
 }
 
+function New-ActionFor($t) {
+    # A task with an explicit Interpreter runs that binary directly (python.exe
+    # for the nightly batch); everything else is a .ps1 run through powershell.
+    if ($t.Interpreter) {
+        return New-ScheduledTaskAction -Execute $t.Interpreter `
+            -Argument "`"$($t.Script)`"" -WorkingDirectory "C:\local_LLM"
+    }
+    return New-ScheduledTaskAction -Execute "powershell.exe" `
+        -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$($t.Script)`""
+}
+
+function New-PrincipalFor($t) {
+    if ($t.RunAs -eq "User") {
+        # Interactive: runs only while this user is logged on, under their
+        # profile - needed for the HuggingFace cache (see the task table above).
+        # No stored password required, unlike "run whether logged on or not".
+        return New-ScheduledTaskPrincipal -UserId "$env:USERDOMAIN\$env:USERNAME" -LogonType Interactive
+    }
+    # SYSTEM + ServiceAccount: no stored password needed, and it runs without
+    # anyone logged in - the whole point of using a scheduled task here (9-4).
+    return New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccount -RunLevel Highest
+}
+
+function New-SettingsFor($t) {
+    # StartWhenAvailable on every task: if the box was off at the scheduled
+    # time, run the task once it is back rather than skipping the day silently.
+    if ($t.WakeToRun) {
+        return New-ScheduledTaskSettingsSet -StartWhenAvailable -WakeToRun
+    }
+    return New-ScheduledTaskSettingsSet -StartWhenAvailable
+}
+
 function Install-Tasks {
     foreach ($t in $Tasks) {
         if (Get-ScheduledTask -TaskName $t.Name -ErrorAction SilentlyContinue) {
             Unregister-ScheduledTask -TaskName $t.Name -Confirm:$false
         }
-        $action = New-ScheduledTaskAction -Execute "powershell.exe" `
-            -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$($t.Script)`""
+        $action = New-ActionFor $t
         $trigger = New-TriggerFor $t
-        # SYSTEM + ServiceAccount: no stored password needed, and it runs without
-        # anyone logged in - the whole point of using a scheduled task here (9-4).
-        $principal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccount -RunLevel Highest
+        $principal = New-PrincipalFor $t
+        $settings = New-SettingsFor $t
         try {
-            Register-ScheduledTask -TaskName $t.Name -Action $action -Trigger $trigger -Principal $principal -ErrorAction Stop | Out-Null
+            Register-ScheduledTask -TaskName $t.Name -Action $action -Trigger $trigger `
+                -Principal $principal -Settings $settings -ErrorAction Stop | Out-Null
             Write-Output "installed: $($t.Name)"
         } catch {
             Write-Output "FAILED to install $($t.Name): $($_.Exception.Message)"
