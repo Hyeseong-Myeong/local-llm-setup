@@ -57,7 +57,10 @@ jobs:
           python-version: "3.11"
 
       - name: Install ruff
-        run: pip install ruff
+        # 버전을 고정한다 — 고정하지 않으면 새 ruff 릴리스가 나오는 날
+        # 코드를 바꾸지 않아도 빌드가 깨진다(규칙 추가·동작 변경).
+        # 올릴 때는 로컬에서 같은 버전으로 먼저 돌려보고 올린다.
+        run: pip install ruff==0.17.1
 
       - name: Run ruff check
         run: ruff check src/

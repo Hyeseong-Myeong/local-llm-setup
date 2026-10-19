@@ -119,9 +119,13 @@ def _record(latency_sec: float, n_docs: int, failed: bool = False) -> None:
         logger.exception("리랭커 통계 기록 실패")
 
 
-def available() -> bool:
-    """리랭커를 쓸 수 있는지 — 플래그와 패키지 설치 여부만 본다(모델은 적재하지 않는다)."""
-    if not ENABLED:
+def available(force: bool = False) -> bool:
+    """리랭커를 쓸 수 있는지 — 플래그와 패키지 설치 여부만 본다(모델은 적재하지 않는다).
+
+    force=True 는 환경변수 플래그를 무시한다. ④ 야간 배치가 쓰는 경로다 —
+    배치는 지연이 무관하므로 전역 기본값(꺼짐)과 별개로 항상 켠다.
+    """
+    if not (ENABLED or force):
         return False
     try:
         import sentence_transformers  # noqa: F401
@@ -130,7 +134,9 @@ def available() -> bool:
     return True
 
 
-def rerank(query: str, documents: list[str], top_k: int) -> list[int] | None:
+def rerank(
+    query: str, documents: list[str], top_k: int, force: bool = False
+) -> list[int] | None:
     """(query, doc) 쌍을 cross-encoder 로 재채점해 상위 top_k 의 **원본 인덱스**를 돌려준다.
 
     인덱스를 돌려주는 이유: 호출부가 documents 와 metadatas 를 쌍으로 들고 있어
@@ -139,7 +145,7 @@ def rerank(query: str, documents: list[str], top_k: int) -> list[int] | None:
     쓸 수 없거나 실패하면 None 을 돌려준다 — 호출부가 벡터 검색 순서를 그대로
     쓰게 해서, 리랭커 장애가 검색 자체를 멈추지 않게 한다.
     """
-    if not documents or not available():
+    if not documents or not available(force):
         return None
 
     start = time.perf_counter()
