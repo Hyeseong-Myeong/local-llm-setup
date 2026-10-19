@@ -1,0 +1,16 @@
+# gemma4:e4b + 컨텍스트 131,072 (네이티브 최대) — ④ 야간 배치 전용
+#
+# 용도: 야간 배치(Docs/local_model_feature_proposals.md ④)에서만 쓴다.
+# 임베딩(bge-m3)을 내린 뒤 적재하므로 VRAM 예산 전체를 쓸 수 있다.
+#
+# 근거 (2026-08-22 실측, gemma4-e4b-64k.Modelfile):
+#   num_ctx  4,096 -> 3.30GB (100% GPU)
+#   num_ctx 16,384 -> 3.32GB (100% GPU)
+#   num_ctx 32,768 -> 3.33GB (100% GPU)
+#   num_ctx 65,536 -> 3.37GB (100% GPU)
+# 컨텍스트를 16배 늘려도 0.07GB 만 늘어 KV 캐시 효율이 매우 좋다.
+# 131,072 는 `ollama show` 로 확인한 이 모델의 네이티브 최대값이다.
+#
+# top_p / temperature / top_k 는 원본에서 상속되므로 재지정하지 않는다.
+FROM gemma4:e4b
+PARAMETER num_ctx 131072

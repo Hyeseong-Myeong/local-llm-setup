@@ -8,6 +8,7 @@
 | `qwen3.5-16k.Modelfile` | `qwen3.5-16k` | 16,384 | 6.06GB |
 | `qwen2.5-coder-16k.Modelfile` | `qwen2.5-coder-16k` | 16,384 | 5.46GB |
 | `gemma4-e4b-64k.Modelfile` | `gemma4-e4b-64k` | 65,536 | 3.37GB |
+| `gemma4-e4b-128k.Modelfile` | `gemma4-e4b-128k` | 131,072 | **3.38GB** (2026-10-15 실측) |
 
 전부 100% GPU 이며, 임베딩 모델(`bge-m3`, 0.66GB)과 동시 상주가 가능한 값이다.
 근거와 측정 과정은 `Docs/context_limit_experiment.md` 7장.
@@ -27,6 +28,7 @@
 ollama create qwen3.5-16k        -f modelfiles/qwen3.5-16k.Modelfile
 ollama create qwen2.5-coder-16k  -f modelfiles/qwen2.5-coder-16k.Modelfile
 ollama create gemma4-e4b-64k     -f modelfiles/gemma4-e4b-64k.Modelfile
+ollama create gemma4-e4b-128k    -f modelfiles/gemma4-e4b-128k.Modelfile
 ```
 
 디스크는 거의 늘지 않는다 — 원본의 blob 을 공유하고 매니페스트만 새로 생긴다.
@@ -34,9 +36,19 @@ ollama create gemma4-e4b-64k     -f modelfiles/gemma4-e4b-64k.Modelfile
 
 **확인:**
 
-```bash
+```powershell
 ollama show --parameters qwen3.5-16k     # num_ctx 와 상속된 값이 함께 보여야 한다
 ```
+
+> ⚠️ Windows PowerShell 5.1 에서는 `&&` 로 명령을 이어 쓸 수 없다(파서 에러).
+> 여러 모델을 확인하려면 줄을 나누거나 `;` 로 구분한다.
+
+> ✅ **런타임 업그레이드 내성 확인 (2026-10-15).** Ollama **0.30.11 → 0.40.4** 업그레이드 후
+> 세 파생 모델 전부 `num_ctx` 와 상속 파라미터가 **그대로 유지됐다.**
+> 0.33.x 의 "GGUF model defined default parameter support" 변경이 이 전략을 깨뜨릴지
+> 우려했으나 영향 없었다. 매니페스트만 새로 생기는 구조라 재생성도 필요하지 않았다.
+> **다만 메이저 업그레이드 때마다 이 확인은 반복할 것** — 이 저장소의 컨텍스트 전략 전체가
+> 여기에 의존한다.
 
 ## 2. Bifrost 에 모델 등록 (필수)
 
@@ -69,10 +81,11 @@ ollama show --parameters qwen3.5-16k     # num_ctx 와 상속된 값이 함께 �
 >
 > | 모델 | 쓰는 곳 |
 > |---|---|
-> | `qwen3.5:9b` | `wiki_agent` (`.env` 의 `MODEL_NAME`), 벤치마크 |
-> | `qwen2.5-coder:7b` | 벤치마크 (`BENCHMARK_MODELS` 기본값) |
+> | `gemma4-e4b-64k:latest` | **`wiki_agent` 메인** — `.env` 의 `MODEL_NAME` 현재 값 |
+> | `qwen3.5:9b` · `qwen2.5-coder:7b` | 벤치마크 (`BENCHMARK_MODELS` 기본값, `scripts/benchmark_bifrost.py:10`) |
 > | `bge-m3:latest` | **임베딩 4곳** — 태그까지 정확히 |
-> | `qwen3.5-16k:latest` · `qwen2.5-coder-16k:latest` · `gemma4-e4b-64k:latest` | 위에서 만든 파생 모델 — **태그 필수** |
+> | `qwen3.5-16k:latest` · `qwen2.5-coder-16k:latest` | 위에서 만든 파생 모델 — **태그 필수**. Open WebUI 에서 직접 고른다 |
+> | `gemma4-e4b-128k:latest` | ④ 야간 배치 전용 — 상시 호출하지 않는다(아래 경고 참고) |
 >
 > `impact_analysis.py` 는 `groq/openai/gpt-oss-120b` 를 쓰므로 **groq 프로바이더** 쪽이고
 > Ollama 서버 목록과 무관하다. Open WebUI 에서 직접 고르는 모델은 지금은 Ollama 를
@@ -94,7 +107,13 @@ curl -s http://127.0.0.1:18080/v1/chat/completions \
 ## 3. 소비처 전환
 
 `.env` 의 `MODEL_NAME` 을 파생 모델명으로 바꾸면 `wiki_agent` 가 그것을 쓴다.
-**`:latest` 를 빼먹지 말 것** — `MODEL_NAME=qwen3.5-16k:latest`.
+**`:latest` 를 빼먹지 말 것.**
+
+**현재 값은 `MODEL_NAME=gemma4-e4b-64k:latest` 다.** `qwen3.5-16k` 가 아니다 — Wiki Agent 는
+문서 컴파일 파이프라인이라 ① 긴 컨텍스트(65,536)와 ② 가장 가벼운 적재 크기(3.37GB, 임베딩
+동시 상주 여유)가 더 중요해서 `gemma4-e4b-64k` 를 쓴다. `qwen3.5-16k` 는 Open WebUI 에서
+사람이 직접 고르는 대화용이다.
+
 Open WebUI 는 모델 선택 목록에서 고른다.
 
 > ⚠️ **원본 모델은 그대로 둔다.** 파생 모델은 컨텍스트가 커서 임베딩과의 동시 상주 여유가

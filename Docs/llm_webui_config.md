@@ -30,6 +30,15 @@ Open WebUI의 **관리자 설정(Settings) > 연결(Connections)** 메뉴에서 
 ## 3. 🎭 역할별 커스텀 모델(페르소나) 생성하기
 Open WebUI의 **작업공간(Workspace) > 모델(Models) > `+ 만들기(Create)`** 탭을 이용하여, 각 베이스 모델 위에 역할(시스템 프롬프트)을 부여한 **나만의 커스텀 에이전트**를 만드세요.
 
+> 🔴 **2026-10-15 베이스 모델 교체 — 기존 페르소나는 다시 만들어야 한다.**
+> `phi4:latest` · `exaone3.5:7.8b` 를 **삭제했다**(둘 다 `capabilities` 가 `completion` 뿐이라
+> 툴·사고·비전을 전혀 못 쓰고, 현재 라인업이 전면 상회한다). 이 두 모델을 베이스로 만든
+> 페르소나(`🐛 Logic Debugger` · `📝 Korean Tech Writer` · `💼 Resume Reviewer`)는 Open WebUI
+> 작업공간에서 **베이스 모델을 아래 값으로 바꿔 저장해야 동작한다.** 그대로 두면 모델 호출이 실패한다.
+>
+> 교체 근거: `qwen3.5-16k` 는 thinking 을 네이티브 지원해 논리 검증에 더 맞고,
+> `gemma4-e4b-64k` 는 컨텍스트가 65,536 이라 긴 한국어 문서 요약에 유리하다.
+
 ### 🛠️ 1. 리팩토링 & 아키텍트 (DeepSeek-R1 기반)
 * **Base Model (선택):** `deepseek-r1:14b`
 * **Name:** `🛠️ Refactoring Master`
@@ -39,8 +48,8 @@ Open WebUI의 **작업공간(Workspace) > 모델(Models) > `+ 만들기(Create)`
   > 코드를 출력하기 전, 왜 그렇게 수정해야 하는지 명확한 논리를 먼저 설명하세요. 코드는 반드시 Markdown 블록으로 작성해야 합니다.
 * **Advanced Params:** Temperature `0.1`
 
-### 🐛 2. 로직 디버깅 & 코드 헬퍼 (Phi-4 기반)
-* **Base Model (선택):** `phi4:latest`
+### 🐛 2. 로직 디버깅 & 코드 헬퍼 (Qwen3.5 기반)
+* **Base Model (선택):** `qwen3.5-16k:latest` *(구 `phi4:latest` — 2026-10-15 삭제됨)*
 * **Name:** `🐛 Logic Debugger`
 * **System Prompt (시스템 프롬프트):**
   > 당신은 깐깐하고 꼼꼼한 시니어 개발자입니다. 
@@ -48,8 +57,9 @@ Open WebUI의 **작업공간(Workspace) > 모델(Models) > `+ 만들기(Create)`
   > 문제의 원인을 짚어주고, 이를 해결하기 위한 정확한 패치 코드를 제시하세요.
 * **Advanced Params:** Temperature `0.0` (가장 엄격하게)
 
-### 🇰🇷 3. 한국어 기술 문서 요약가 (EXAONE 기반)
-* **Base Model (선택):** `exaone3.5:7.8b` (또는 3.0)
+### 🇰🇷 3. 한국어 기술 문서 요약가 (Gemma 4 기반)
+* **Base Model (선택):** `gemma4-e4b-64k:latest` *(구 `exaone3.5:7.8b` — 2026-10-15 삭제됨)*
+  * 긴 문서를 한 번에 넣어야 하는 역할이라 컨텍스트 65,536 인 이 모델을 고른다.
 * **Name:** `📝 Korean Tech Writer`
 * **System Prompt (시스템 프롬프트):**
   > 당신은 IT 전문 테크니컬 라이터입니다.
@@ -57,8 +67,9 @@ Open WebUI의 **작업공간(Workspace) > 모델(Models) > `+ 만들기(Create)`
   > 마크다운 양식을 사용하여 목차, 핵심 요약, 상세 설명 구조로 문서를 깔끔하게 포매팅하세요. 전문 IT 용어는 원문을 괄호 안에 병기하세요.
 * **Advanced Params:** Temperature `0.3 ~ 0.4` (약간의 번역 유연성 허용)
 
-### 📄 4. 텍스트/이력서 첨삭 전용 (EXAONE 기반, 툴 완벽 차단)
-* **Base Model (선택):** `exaone3.5:7.8b`
+### 📄 4. 텍스트/이력서 첨삭 전용 (Qwen3.5 기반, 툴 완벽 차단)
+* **Base Model (선택):** `qwen3.5-16k:latest` *(구 `exaone3.5:7.8b` — 2026-10-15 삭제됨)*
+  * 이력서는 `#personal` 데이터다 — 로컬 전용 경계를 지켜야 하므로 클라우드 모델로 바꾸지 말 것.
 * **Name:** `💼 Resume Reviewer (No Tools)`
 * **System Prompt (시스템 프롬프트):**
   > (앞서 다듬은 '핑크 코끼리 방지용' 긍정 템플릿 적용)
@@ -71,9 +82,10 @@ Open WebUI의 **작업공간(Workspace) > 모델(Models) > `+ 만들기(Create)`
 ## 4. 💡 Open WebUI 사용 꿀팁 (Workflow 연계)
 
 * **채팅창 모델 다중 선택 (Multi-Model Chat):**
-  Claude로 짠 뼈대 코드를 채팅창에 던질 때, 채팅방의 모델을 `🛠️ Refactoring Master`와 `🐛 Logic Debugger` 두 개를 동시에 선택(+)해 보세요. 동일한 코드에 대해 DeepSeek-R1과 Phi-4가 각각 리팩토링 시점과 버그 탐지 시점에서 의견을 내는 것을 한 번에 비교할 수 있습니다.
+  Claude로 짠 뼈대 코드를 채팅창에 던질 때, 채팅방의 모델을 `🛠️ Refactoring Master`와 `🐛 Logic Debugger` 두 개를 동시에 선택(+)해 보세요. 동일한 코드에 대해 DeepSeek-R1과 Qwen3.5가 각각 리팩토링 시점과 버그 탐지 시점에서 의견을 내는 것을 한 번에 비교할 수 있습니다.
+  * ⚠️ 단, `deepseek-r1:14b`(8.99GB)는 VRAM 예산(약 6.7GB)을 넘어 항상 CPU 분할이다 — 동시 선택하면 두 모델을 번갈아 재적재하느라 매우 느려진다. 비교가 목적일 때만 쓸 것.
 * **문서 첨부 (RAG):**
-  EXAONE 기반 모델과 대화할 때, Open WebUI의 `+` 버튼을 눌러 PDF나 마크다운 파일을 던져주면 빠르고 정확한 한국어 문서 요약 및 추출이 가능합니다.
+  `📝 Korean Tech Writer`(`gemma4-e4b-64k`)와 대화할 때, Open WebUI의 `+` 버튼을 눌러 PDF나 마크다운 파일을 던져주면 빠르고 정확한 한국어 문서 요약 및 추출이 가능합니다. 컨텍스트가 65,536이라 긴 문서도 잘려나가지 않습니다.
 
 ---
 
@@ -143,7 +155,7 @@ Open WebUI의 **설정(Settings) > 문서(Documents) / 웹 검색(Web Search)** 
 
 ### 1. 전역 시스템 프롬프트 (Global System Prompt) 설정
 * **위치:** 설정(Settings) > 일반(General) > 시스템 프롬프트(System Prompt)
-* **설명:** 챗봇들이 대화를 시작할 때 기본적으로 깔고 들어가는 **'절대 규칙'**을 정합니다. 개별 모델(Phi-4, EXAONE 등)의 성향과 무관하게, 고객님의 서버에서 구동되는 모든 AI가 공통적으로 지켜야 할 뼈대 가이드라인을 주입할 수 있습니다.
+* **설명:** 챗봇들이 대화를 시작할 때 기본적으로 깔고 들어가는 **'절대 규칙'**을 정합니다. 개별 모델(Qwen3.5, Gemma 4 등)의 성향과 무관하게, 고객님의 서버에서 구동되는 모든 AI가 공통적으로 지켜야 할 뼈대 가이드라인을 주입할 수 있습니다.
 * **권장 프롬프트 예시:**
   > "너는 언제나 한국어로 대답해야 한다. 불필요한 인사말이나 서론은 생략하고, 질문에 대한 핵심만 바로 말해라. 코드를 작성할 때는 반드시 Markdown 코드 블록을 사용하고, 코드 내 주석은 한국어로 작성해라."
 

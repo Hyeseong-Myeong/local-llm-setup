@@ -520,7 +520,19 @@ def save_wiki(state: AgentState) -> AgentState:
 
     # 파일명 확정 후 base_name 계산 (충돌 시 접미사 반영)
     final_file_name = os.path.basename(save_path)
-    base_name = final_file_name.replace(".md", "")
+    # splitext 로 확장자만 떼낸다 — .replace(".md", "") 는 greedy 라서 제목 안에
+    # 들어간 .md 까지 지운다(예: "... [[Discord_20260724_120800.md]].md").
+    base_name = os.path.splitext(final_file_name)[0]
+
+    # modified_at: 문서가 마지막으로 쓰인 시각. 파일 mtime 에서 읽는다 —
+    # now() 가 아니라 mtime 이어야 reembed_chroma.py(일괄 재색인)와 의미가 같아진다
+    # (거기서는 now() 를 쓰면 전 문서가 같은 값이 되어 정렬이 무의미해진다).
+    try:
+        modified_at = datetime.datetime.fromtimestamp(
+            os.path.getmtime(save_path)
+        ).isoformat(timespec="seconds")
+    except OSError:
+        modified_at = datetime.datetime.now().isoformat(timespec="seconds")
 
     docs = []
     ids = []
@@ -528,7 +540,12 @@ def save_wiki(state: AgentState) -> AgentState:
     for i, chunk in enumerate(chunks):
         docs.append(chunk)
         ids.append(f"{base_name}_chunk_{i}")
-        metadatas.append({"category": state['category'], "source": base_name})
+        metadatas.append({
+            "category": state['category'],
+            "source": base_name,
+            "modified_at": modified_at,
+            "chunk_index": i,
+        })
 
     if docs:
         # 구버전 청크 삭제: 동일 source의 이전 데이터가 남지 않도록 정리

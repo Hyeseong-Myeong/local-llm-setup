@@ -18,6 +18,7 @@ from pydantic import BaseModel, Field
 from chroma_client import get_chroma_client
 from config import settings
 from embedding_function import get_embedding_function
+from tools.wiki_tools import list_wiki_documents, read_wiki_document, search_wiki
 
 # 1. FastAPI 애플리케이션 초기화
 app = FastAPI(
@@ -44,7 +45,18 @@ class SearchRequest(BaseModel):
     n_results: int = Field(3, description="가져올 검색 결과의 개수입니다.")
 
 class RecentTitlesRequest(BaseModel):
-    limit: int = Field(..., description="가져올 최근 문서 제목의 최대 개수입니다. 기본적으로 10을 입력하세요.")
+    limit: int = Field(..., description="가져올 문서의 최대 개수입니다. 기본적으로 10을 입력하세요.")
+    category: str | None = Field(
+        None,
+        description="특정 분류로 한정할 때만 지정합니다(예: tech). 비우면 전체를 봅니다.",
+    )
+
+
+class ReadDocumentRequest(BaseModel):
+    source: str = Field(
+        ...,
+        description="읽을 문서의 정확한 제목(source)입니다. 목록 조회 툴로 먼저 확인하세요.",
+    )
 
 # 4. API Key 검증 로직
 security = HTTPBearer()
@@ -67,46 +79,30 @@ def healthz():
 # 5. 엔드포인트 정의 (Open WebUI가 이 정보를 바탕으로 툴을 등록합니다)
 @app.post("/search_wiki_knowledge", summary="로컬 위키 검색", description="사용자가 '로컬 AI', '위키', '시스템 환경설정', '에러' 등에 대해 구체적으로 질문할 때만 사용하세요. 일반적인 인사나 무관한 질문에는 절대 이 툴을 호출하지 마세요.", operation_id="search_wiki_knowledge")
 def search_wiki_knowledge(request: SearchRequest, api_key: str = Depends(verify_api_key)):
-    if not collection:
-        return {"result": "오류: 위키 데이터베이스(ChromaDB)에 연결되어 있지 않습니다."}
+    # 로직은 tools/wiki_tools.py 에 있다 — ① ReAct 에이전트가 같은 함수를 쓴다.
+    return {"result": search_wiki(collection, request.query, request.n_results)}
 
-    try:
-        results = collection.query(
-            query_texts=[request.query],
-            n_results=request.n_results
-        )
-
-        if not results['documents'] or not results['documents'][0]:
-            return {"result": f"'{request.query}'에 대한 위키 지식을 찾을 수 없습니다."}
-
-        formatted_results = []
-        for metadata, doc in zip(results['metadatas'][0], results['documents'][0]):
-            source = metadata.get('source', 'Unknown')
-            category = metadata.get('category', 'Unknown')
-            formatted_results.append(f"▶ 출처: {source} (카테고리: {category})\n내용: {doc}")
-
-        return {"result": "\n\n---\n\n".join(formatted_results)}
-    except Exception as e:
-        return {"result": f"위키 검색 중 오류가 발생했습니다: {str(e)}"}
 
 @app.post("/get_recent_wiki_titles", summary="최근 위키 문서 제목 조회", description="가장 최근에 저장된 위키 문서들의 제목을 가져옵니다.", operation_id="get_recent_wiki_titles")
 def get_recent_wiki_titles(request: RecentTitlesRequest, api_key: str = Depends(verify_api_key)):
-    if not collection:
-        return {"result": "오류: 위키 데이터베이스에 연결되어 있지 않습니다."}
+    """구 이름을 유지한다 — Open WebUI 에 등록된 operation_id 를 깨지 않기 위해서다.
 
-    try:
-        results = collection.get(limit=request.limit)
-        if not results['metadatas']:
-            return {"result": "저장된 문서가 없습니다."}
+    동작은 list_wiki_documents 로 교체됐다(문서 단위 집계 + indexed_at 정렬).
+    """
+    return {"result": list_wiki_documents(collection, request.limit, request.category)}
 
-        titles = set()
-        for meta in results['metadatas']:
-            if 'source' in meta:
-                titles.add(meta['source'])
 
-        return {"result": "최근 위키 문서 목록:\n- " + "\n- ".join(list(titles)[:request.limit])}
-    except Exception as e:
-        return {"result": f"문서 목록 조회 중 오류가 발생했습니다: {str(e)}"}
+@app.post(
+    "/read_wiki_document",
+    summary="위키 문서 전문 읽기",
+    description="검색으로 찾은 문서의 전체 내용을 읽어야 할 때 사용하세요. 정확한 문서 제목(source)이 필요합니다.",
+    operation_id="read_wiki_document",
+)
+def read_wiki_document_endpoint(
+    request: ReadDocumentRequest, api_key: str = Depends(verify_api_key)
+):
+    return {"result": read_wiki_document(collection, request.source)}
+
 
 class _HealthCheckAccessFilter(logging.Filter):
     """/healthz 를 uvicorn 액세스 로그에서 뺀다 — 30초마다 한 줄씩 쌓인다.

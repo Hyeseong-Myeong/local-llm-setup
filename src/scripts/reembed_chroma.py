@@ -1,3 +1,5 @@
+import argparse
+import datetime
 import os
 import sys
 
@@ -38,8 +40,22 @@ target_dirs = [
 
 text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
 
+parser = argparse.ArgumentParser(
+    description="Vault 전체를 ChromaDB 로 재색인한다. 기본은 비파괴(upsert)."
+)
+parser.add_argument(
+    "--prune",
+    action="store_true",
+    help=(
+        "Vault 에 대응 파일이 없는 색인 문서(고아 레코드)를 삭제한다. "
+        "기본은 꺼져 있다 — 켜면 데이터가 지워진다."
+    ),
+)
+args = parser.parse_args()
+
 total_files = 0
 total_chunks = 0
+seen_sources = set()
 
 for category, dir_path in target_dirs:
     if not os.path.exists(dir_path):
@@ -58,19 +74,44 @@ for category, dir_path in target_dirs:
                 content = f.read()
 
             chunks = text_splitter.split_text(content)
-            base_name = file_name.replace(".md", "")
+            # splitext 로 확장자만 떼낸다 — wiki_agent.py 와 반드시 같은 방식이어야
+            # 한다. 한쪽만 바꾸면 같은 문서가 서로 다른 source 로 갈라진다.
+            base_name = os.path.splitext(file_name)[0]
 
             docs = []
             ids = []
             metadatas = []
 
+            # modified_at 은 반드시 파일 mtime 이어야 한다 — now() 로 넣으면 전 문서가
+            # 같은 값이 되어 "최신순" 정렬이 다시 무의미해진다(① 1-1 확정 사양).
+            modified_at = datetime.datetime.fromtimestamp(
+                os.path.getmtime(file_path)
+            ).isoformat(timespec="seconds")
+
             for i, chunk in enumerate(chunks):
                 docs.append(chunk)
                 ids.append(f"{base_name}_chunk_{i}")
-                metadatas.append({"category": category, "source": base_name})
+                metadatas.append({
+                    "category": category,
+                    "source": base_name,
+                    "modified_at": modified_at,
+                    "chunk_index": i,
+                })
 
             if docs:
+                # 분할 결과가 달라지면 예전 청크 id 가 남아 중복 결과를 낸다.
+                try:
+                    stale = collection.get(where={"source": base_name})
+                    keep = set(ids)
+                    stale_ids = [x for x in (stale.get("ids") or []) if x not in keep]
+                    if stale_ids:
+                        collection.delete(ids=stale_ids)
+                        print(f"   · 구버전 청크 {len(stale_ids)}개 정리")
+                except Exception as exc:
+                    print(f"   · 구버전 청크 확인 실패(무시): {exc}")
+
                 collection.upsert(documents=docs, ids=ids, metadatas=metadatas)
+                seen_sources.add(base_name)
                 total_files += 1
                 total_chunks += len(docs)
                 print(f"   ✓ {file_name} -> {len(docs)}개 청크 임베딩 완료")
@@ -78,3 +119,36 @@ for category, dir_path in target_dirs:
             print(f"   ❌ [오류] {file_name} 처리 실패 (건너뜀): {e}")
 
 print(f"\n🎉 전체 재임베딩 완료! (총 {total_files}개 파일, {total_chunks}개 벡터 조각)")
+
+# Vault 에 없는 색인 문서(고아 레코드) 점검. 원본이 지워졌는데 색인만 남은 것들이며,
+# personal 분류가 섞여 있을 수 있어 조용히 두면 프라이버시 경계에 구멍이 된다.
+everything = collection.get()
+indexed_sources = {}
+for meta in (everything.get("metadatas") or []):
+    src = (meta or {}).get("source")
+    if src:
+        indexed_sources.setdefault(src, (meta or {}).get("category", "Unknown"))
+
+orphans = {
+    src: cat for src, cat in indexed_sources.items() if src not in seen_sources
+}
+print()
+if not orphans:
+    print("✅ 고아 레코드 없음 — 색인과 vault 가 일치합니다.")
+else:
+    print(f"⚠️ 고아 레코드 {len(orphans)}개 (vault 에 대응 파일 없음):")
+    for src, cat in sorted(orphans.items()):
+        flag = "   ← personal!" if cat != "tech" else ""
+        print(f"   [{cat}] {src}{flag}")
+    print()
+    if not args.prune:
+        print("   삭제하지 않았습니다. 지우려면 --prune 을 붙여 다시 실행하십시오.")
+    else:
+        removed = 0
+        for src in orphans:
+            got = collection.get(where={"source": src})
+            ids_to_del = got.get("ids") or []
+            if ids_to_del:
+                collection.delete(ids=ids_to_del)
+                removed += len(ids_to_del)
+        print(f"🧹 --prune: 고아 청크 {removed}개 삭제 완료.")
