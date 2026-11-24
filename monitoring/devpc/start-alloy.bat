@@ -26,8 +26,9 @@ if "%NAS_TAILNET_IP%"=="" (
 :: under the same name is not seen as new on Windows (alloy#2292).
 :: On purpose these files are NOT matched by config.alloy - shipping Alloy's own
 :: error log through Alloy would feed a push failure back into itself.
-for /f "tokens=2 delims==" %%I in ('wmic os get localdatetime /value') do set LDT=%%I
-set STAMP=%LDT:~0,8%-%LDT:~8,4%
+:: wmic.exe is removed/disabled from Windows 11 24H2, so the stamp comes from
+:: PowerShell. Same format as before: yyyyMMdd-HHmm.
+for /f %%I in ('powershell -NoProfile -Command "Get-Date -Format yyyyMMdd-HHmm"') do set STAMP=%%I
 
 :: Hidden background launch - a plain foreground call here keeps the wrapping
 :: cmd window open forever (alloy.exe never exits on its own), so restart.bat
