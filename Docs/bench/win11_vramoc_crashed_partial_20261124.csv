@@ -1,0 +1,3 @@
+﻿"model","ctx","loaded_gb","gpu_pct","vram_used_gb","cold_load_s","decode_tps_cold","decode_tps_warm","decode_tokens","prefill_tps","prefill_tokens","ttft_warm_s","error"
+"qwen2.5-coder:7b","4096","4.43","100","5.67","5.84","31.22","31.25","256","242.54","1570","0.06",""
+"qwen2.5-coder-16k:latest","16384","5.1","100","6.55","6.34","31.86","31.96","256","247.71","1570","0.06",""
